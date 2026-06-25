@@ -1,29 +1,29 @@
-import './config/env.js'   // loads + validates .env — must be first
+import 'dotenv/config'
 
-import express   from 'express'
-import cors      from 'cors'
-import helmet    from 'helmet'
-import morgan    from 'morgan'
+import express from 'express'
+import cors from 'cors'
+import helmet from 'helmet'
+import morgan from 'morgan'
 import rateLimit from 'express-rate-limit'
 
-import connectDB     from './config/db.js'
-import errorHandler  from './middleware/errorHandler.js'
+import connectDB from './config/db.js'
+import errorHandler from './middleware/errorHandler.js'
 import { startRenewalReminderJob } from './jobs/renewalReminders.js'
-import { startBirthdayJob }        from './jobs/birthdayGreetings.js'
+import { startBirthdayJob } from './jobs/birthdayGreetings.js'
 
 // ── Routes ────────────────────────────────────────────────────────────────
-import authRoutes         from './routes/auth.routes.js'
-import leadRoutes         from './routes/lead.routes.js'
-import memberRoutes       from './routes/member.routes.js'
-import planRoutes         from './routes/plan.routes.js'
-import invoiceRoutes      from './routes/invoice.routes.js'
-import attendanceRoutes   from './routes/attendance.routes.js'
-import dashboardRoutes    from './routes/dashboard.routes.js'
-import workoutRoutes      from './routes/workout.routes.js'
-import staffRoutes        from './routes/staff.routes.js'
+import authRoutes from './routes/auth.routes.js'
+import leadRoutes from './routes/lead.routes.js'
+import memberRoutes from './routes/member.routes.js'
+import planRoutes from './routes/plan.routes.js'
+import invoiceRoutes from './routes/invoice.routes.js'
+import attendanceRoutes from './routes/attendance.routes.js'
+import dashboardRoutes from './routes/dashboard.routes.js'
+import workoutRoutes from './routes/workout.routes.js'
+import staffRoutes from './routes/staff.routes.js'
 import subscriptionRoutes from './routes/subscription.routes.js'
-import saasAdminRoutes    from './routes/saasAdmin.routes.js'
-import webhookRoutes      from './routes/webhook.routes.js'
+import saasAdminRoutes from './routes/saasAdmin.routes.js'
+import webhookRoutes from './routes/webhook.routes.js'
 
 // ── Connect DB ────────────────────────────────────────────────────────────
 await connectDB()
@@ -39,7 +39,7 @@ app.use('/api/webhooks/razorpay', webhookRoutes)
 
 // ── CORS ──────────────────────────────────────────────────────────────────
 app.use(cors({
-  origin:      process.env.CLIENT_URL || 'http://localhost:5173',
+  origin: process.env.CLIENT_URL || 'http://localhost:5173',
   credentials: true,
 }))
 
@@ -60,17 +60,17 @@ const authLimiter = rateLimit({
 })
 
 // ── Mount routes ──────────────────────────────────────────────────────────
-app.use('/api/auth',          authLimiter, authRoutes)
-app.use('/api/leads',         leadRoutes)
-app.use('/api/members',       memberRoutes)
-app.use('/api/plans',         planRoutes)
-app.use('/api/invoices',      invoiceRoutes)
-app.use('/api/attendance',    attendanceRoutes)
-app.use('/api/dashboard',     dashboardRoutes)
+app.use('/api/auth', authLimiter, authRoutes)
+app.use('/api/leads', leadRoutes)
+app.use('/api/members', memberRoutes)
+app.use('/api/plans', planRoutes)
+app.use('/api/invoices', invoiceRoutes)
+app.use('/api/attendance', attendanceRoutes)
+app.use('/api/dashboard', dashboardRoutes)
 app.use('/api/workout-plans', workoutRoutes)
-app.use('/api/staff',         staffRoutes)
+app.use('/api/staff', staffRoutes)
 app.use('/api/subscriptions', subscriptionRoutes)
-app.use('/api/saas-admin',    saasAdminRoutes)
+app.use('/api/saas-admin', saasAdminRoutes)
 
 // ── Health check ──────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok', time: new Date().toISOString() }))

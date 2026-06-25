@@ -58,32 +58,65 @@
 // }
 
 
-//!#############################################################################################################################
+//*#############################################################################################################################
 
 import nodemailer from 'nodemailer'
+import { google } from 'googleapis'
 
-let transporter
+const oauth2Client = new google.auth.OAuth2(
+  process.env.GOOGLE_CLIENT_ID,
+  process.env.GOOGLE_CLIENT_SECRET,
+  'https://developers.google.com/oauthplayground'
+);
 
-function getTransporter() {
-  if (!transporter) {
-    if (!process.env.SMTP_HOST) {
-      // Dev fallback — logs email JSON to console instead of sending
-      transporter = nodemailer.createTransport({ jsonTransport: true })
-      return transporter
-    }
-    transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT) || 587,
-      secure: false,
-      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-    })
-  }
-  return transporter
+oauth2Client.setCredentials({
+  refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
+});
+
+async function getTransporter() {
+  const accessToken = await oauth2Client.getAccessToken();
+
+  return nodemailer.createTransport({
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false,
+    auth: {
+      type: 'OAuth2',
+      user: process.env.SMTP_USER,
+      clientId: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      refreshToken: process.env.GOOGLE_REFRESH_TOKEN,
+      accessToken: accessToken.token,
+    },
+  });
 }
+
+//!#############################################################################################################################
+
+// import nodemailer from 'nodemailer'
+
+// let transporter
+
+// function getTransporter() {
+//   if (!transporter) {
+//     if (!process.env.SMTP_HOST) {
+//       // Dev fallback — logs email JSON to console instead of sending
+//       transporter = nodemailer.createTransport({ jsonTransport: true })
+//       return transporter
+//     }
+//     transporter = nodemailer.createTransport({
+//       host: process.env.SMTP_HOST,
+//       port: Number(process.env.SMTP_PORT) || 587,
+//       secure: false,
+//       auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+//     })
+//   }
+//   return transporter
+// }
 
 export async function sendEmail({ to, subject, html, text }) {
   if (!to) return   // silently skip if member has no email
-  const mail = getTransporter()
+  const mail = await getTransporter()
   const info = await mail.sendMail({ from: process.env.EMAIL_FROM || '"FitOS" <hello@fitos.in>', to, subject, html, text })
   if (process.env.NODE_ENV !== 'production') {
     console.log(`[email] ✉️  To: ${to} | Subject: ${subject}`)

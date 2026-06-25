@@ -80,6 +80,7 @@ async function getTransporter() {
     host: 'smtp.gmail.com',
     port: 587,
     secure: false,
+    requireTLS: true,
     auth: {
       type: 'OAuth2',
       user: process.env.SMTP_USER,
@@ -88,6 +89,9 @@ async function getTransporter() {
       refreshToken: process.env.GOOGLE_REFRESH_TOKEN,
       accessToken: accessToken.token,
     },
+    tls: {
+      minVersion: "TLSv1.2"
+    }
   });
 }
 

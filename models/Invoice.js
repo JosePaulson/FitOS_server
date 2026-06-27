@@ -1,4 +1,5 @@
 import { Schema, model } from 'mongoose'
+import Gym from './Gym.js'
 
 const invoiceSchema = new Schema(
   {
@@ -6,14 +7,20 @@ const invoiceSchema = new Schema(
     memberId: { type: Schema.Types.ObjectId, ref: 'Member', required: true, index: true },
     planId:   { type: Schema.Types.ObjectId, ref: 'MembershipPlan' },
 
-    invoiceNumber: { type: String, unique: true },
+    /**
+     * Invoice number format: <SUBDOMAIN>-<SEQ>
+     * e.g.  IRONZONE-00001  FLEXFIT-00003
+     *
+     * Unique per gym (compound index on gymId + invoiceNumber).
+     * The sequence is atomically incremented on the Gym document,
+     * so concurrent invoice creation never produces duplicates.
+     */
+    invoiceNumber: { type: String, index: true },
 
-    // Price breakdown — all tax-inclusive
-    // totalAmount = baseAmount + taxAmount  (= plan.price)
-    baseAmount:  { type: Number, required: true },  // price excl. tax
-    taxRate:     { type: Number, default: 18 },     // GST %
-    taxAmount:   { type: Number, default: 0 },      // tax portion
-    totalAmount: { type: Number, required: true },  // what member pays (tax incl.)
+    baseAmount:  { type: Number, required: true },
+    taxRate:     { type: Number, default: 18 },
+    taxAmount:   { type: Number, default: 0 },
+    totalAmount: { type: Number, required: true },
 
     status: {
       type: String,
@@ -38,12 +45,43 @@ const invoiceSchema = new Schema(
   { timestamps: true }
 )
 
+/**
+ * Compound unique index:
+ *   (gymId, invoiceNumber) must be unique — not invoiceNumber alone.
+ *   This means IRONZONE-00001 and FLEXFIT-00001 can both exist globally,
+ *   but IRONZONE cannot have two INV-00001s.
+ */
+invoiceSchema.index({ gymId: 1, invoiceNumber: 1 }, { unique: true })
+
+/**
+ * Atomically increment Gym.invoiceSeq and build the invoice number.
+ *
+ * Using $inc inside findOneAndUpdate is atomic in MongoDB — even if two
+ * invoice documents are created simultaneously for the same gym, each gets
+ * a different sequence number because MongoDB processes the $inc as a
+ * single atomic operation at the document level.
+ */
 invoiceSchema.pre('save', async function (next) {
-  if (this.isNew && !this.invoiceNumber) {
-    const count = await this.constructor.countDocuments({ gymId: this.gymId })
-    this.invoiceNumber = `INV-${String(count + 1).padStart(5, '0')}`
+  if (!this.isNew || this.invoiceNumber) return next()
+
+  try {
+    const gym = await Gym.findByIdAndUpdate(
+      this.gymId,
+      { $inc: { invoiceSeq: 1 } },
+      { new: true, select: 'invoiceSeq subdomain' }
+    )
+
+    if (!gym) return next(new Error('Gym not found when generating invoice number'))
+
+    // Prefix: first 8 chars of subdomain, uppercased
+    const prefix = gym.subdomain.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8)
+    const seq    = String(gym.invoiceSeq).padStart(5, '0')
+
+    this.invoiceNumber = `${prefix}-${seq}`
+    next()
+  } catch (err) {
+    next(err)
   }
-  next()
 })
 
 export default model('Invoice', invoiceSchema)

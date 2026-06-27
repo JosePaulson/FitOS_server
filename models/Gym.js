@@ -22,10 +22,20 @@ const gymSchema = new Schema(
     state:   { type: String },
     logo:    { type: String },
 
+    /**
+     * Atomic invoice sequence counter.
+     * Incremented via findOneAndUpdate($inc) — never read-then-write.
+     * This guarantees no two invoices for the same gym share a number,
+     * even under concurrent requests.
+     */
+    invoiceSeq: { type: Number, default: 0 },
+
     settings: {
       currency:   { type: String, default: 'INR' },
       timezone:   { type: String, default: 'Asia/Kolkata' },
       brandColor: { type: String, default: '#C8F135' },
+      emailFrom:  { type: String, default: '' },
+      replyTo:    { type: String, default: '' },
     },
 
     isActive: { type: Boolean, default: true },

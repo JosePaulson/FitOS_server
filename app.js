@@ -44,6 +44,7 @@ app.use('/api/webhooks/razorpay', webhookRoutes)
 // ── CORS ──────────────────────────────────────────────────────────────────
 const allowedOrigins = [
   process.env.CLIENT_URL,                    // Production URL from env
+  process.env.MEMBER_PORTAL_URL,
   'http://localhost:5173',                   // Local Vite dev server
   'http://localhost:5174',
   'http://192.168.0.111:5174'

@@ -1,4 +1,4 @@
-import 'dotenv/config'
+import './config/env.js'   // loads + validates .env — must be first
 
 import express from 'express'
 import cors from 'cors'
@@ -23,6 +23,10 @@ import workoutRoutes from './routes/workout.routes.js'
 import staffRoutes from './routes/staff.routes.js'
 import subscriptionRoutes from './routes/subscription.routes.js'
 import saasAdminRoutes from './routes/saasAdmin.routes.js'
+import gymRoutes from './routes/gym.routes.js'
+import memberPortalAuthRoutes from './routes/memberPortal.auth.routes.js'
+import memberPortalRoutes from './routes/memberPortal.routes.js'
+import memberPortalChatRoutes from './routes/memberPortal.chat.routes.js'
 import webhookRoutes from './routes/webhook.routes.js'
 
 // ── Connect DB ────────────────────────────────────────────────────────────
@@ -38,10 +42,27 @@ app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'))
 app.use('/api/webhooks/razorpay', webhookRoutes)
 
 // ── CORS ──────────────────────────────────────────────────────────────────
+const allowedOrigins = [
+  process.env.CLIENT_URL,                    // Production URL from env
+  'http://localhost:5173',                   // Local Vite dev server
+  'http://localhost:5174',
+  'http://192.168.0.111:5174'
+  // Local React dev server (optional)
+].filter(Boolean);                            // Removes undefined values if env is blank
+
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:5173',
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, curl, or Postman)
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
-}))
+}));
 
 // ── Body parsers ──────────────────────────────────────────────────────────
 app.use(express.json({ limit: '5mb' }))
@@ -71,6 +92,10 @@ app.use('/api/workout-plans', workoutRoutes)
 app.use('/api/staff', staffRoutes)
 app.use('/api/subscriptions', subscriptionRoutes)
 app.use('/api/saas-admin', saasAdminRoutes)
+app.use('/api/gym', gymRoutes)
+app.use('/api/member-portal/auth', memberPortalAuthRoutes)
+app.use('/api/member-portal', memberPortalRoutes)
+app.use('/api/member-portal/chat', memberPortalChatRoutes)
 
 // ── Health check ──────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok', time: new Date().toISOString() }))

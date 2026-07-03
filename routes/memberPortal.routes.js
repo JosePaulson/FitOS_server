@@ -1,11 +1,11 @@
 import { Router } from 'express'
 import { memberProtect } from '../middleware/memberAuth.js'
-import Member         from '../models/Member.js'
+import Member from '../models/Member.js'
 import MembershipPlan from '../models/MembershipPlan.js'
-import Invoice        from '../models/Invoice.js'
-import Attendance     from '../models/Attendance.js'
-import WorkoutPlan    from '../models/WorkoutPlan.js'
-import DietPlan       from '../models/DietPlan.js'
+import Invoice from '../models/Invoice.js'
+import Attendance from '../models/Attendance.js'
+import WorkoutPlan from '../models/WorkoutPlan.js'
+import DietPlan from '../models/DietPlan.js'
 
 const router = Router()
 
@@ -74,7 +74,7 @@ router.get('/attendance', async (req, res, next) => {
     if (month) {
       const [year, m] = month.split('-').map(Number)
       const start = new Date(year, m - 1, 1)
-      const end   = new Date(year, m, 1)
+      const end = new Date(year, m, 1)
       filter.date = { $gte: start, $lt: end }
     } else {
       // Default: last 30 days
@@ -86,11 +86,11 @@ router.get('/attendance', async (req, res, next) => {
     const records = await Attendance.find(filter).sort({ date: -1 })
 
     // Build streak — consecutive days attended
-    const dates     = records.map((r) => r.date.toISOString().split('T')[0])
+    const dates = records.map((r) => r.date.toISOString().split('T')[0])
     const uniqueDates = [...new Set(dates)].sort().reverse()
     let streak = 0
     const today = new Date().toISOString().split('T')[0]
-    let check   = today
+    let check = today
     for (const d of uniqueDates) {
       if (d === check) {
         streak++
@@ -111,7 +111,7 @@ router.get('/attendance/summary', async (req, res, next) => {
       { $match: { gymId: req.gymId, memberId: req.memberId } },
       {
         $group: {
-          _id:   { year: { $year: '$date' }, month: { $month: '$date' } },
+          _id: { year: { $year: '$date' }, month: { $month: '$date' } },
           count: { $sum: 1 },
         },
       },
@@ -122,43 +122,15 @@ router.get('/attendance/summary', async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
-/* ── PT Sessions ──────────────────────────────────────────────────────────── */
-
-/** GET /api/member-portal/pt-sessions */
-router.get('/pt-sessions', async (req, res, next) => {
-  try {
-    const sessions = await Attendance.find({
-      gymId:    req.gymId,
-      memberId: req.memberId,
-      type:     'pt',
-    })
-      .sort({ date: -1 })
-      .populate('trainerId', 'name')
-
-    const totalSessions = sessions.length
-
-    // Sessions included in current plan
-    const member = await Member.findById(req.memberId).populate('currentPlanId', 'sessionsIncluded')
-    const sessionsIncluded = member?.currentPlanId?.sessionsIncluded || 0
-
-    res.json({
-      sessions,
-      totalSessions,
-      sessionsIncluded,
-      sessionsRemaining: sessionsIncluded > 0 ? Math.max(0, sessionsIncluded - totalSessions) : null,
-    })
-  } catch (err) { next(err) }
-})
-
 /* ── Workout Plans ────────────────────────────────────────────────────────── */
 
 /** GET /api/member-portal/workout-plans */
 router.get('/workout-plans', async (req, res, next) => {
   try {
     const plans = await WorkoutPlan.find({
-      gymId:      req.gymId,
+      gymId: req.gymId,
       assignedTo: req.memberId,
-      isActive:   true,
+      isActive: true,
     }).sort({ createdAt: -1 })
     res.json(plans)
   } catch (err) { next(err) }
@@ -168,8 +140,8 @@ router.get('/workout-plans', async (req, res, next) => {
 router.get('/workout-plans/:id', async (req, res, next) => {
   try {
     const plan = await WorkoutPlan.findOne({
-      _id:        req.params.id,
-      gymId:      req.gymId,
+      _id: req.params.id,
+      gymId: req.gymId,
       assignedTo: req.memberId,
     })
     if (!plan) return res.status(404).json({ message: 'Workout plan not found' })
@@ -183,9 +155,9 @@ router.get('/workout-plans/:id', async (req, res, next) => {
 router.get('/diet-plans', async (req, res, next) => {
   try {
     const plans = await DietPlan.find({
-      gymId:      req.gymId,
+      gymId: req.gymId,
       assignedTo: req.memberId,
-      isActive:   true,
+      isActive: true,
     }).sort({ createdAt: -1 })
     res.json(plans)
   } catch (err) { next(err) }
@@ -195,8 +167,8 @@ router.get('/diet-plans', async (req, res, next) => {
 router.get('/diet-plans/:id', async (req, res, next) => {
   try {
     const plan = await DietPlan.findOne({
-      _id:        req.params.id,
-      gymId:      req.gymId,
+      _id: req.params.id,
+      gymId: req.gymId,
       assignedTo: req.memberId,
     })
     if (!plan) return res.status(404).json({ message: 'Diet plan not found' })

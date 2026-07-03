@@ -1,4 +1,4 @@
-import './config/env.js'   // loads + validates .env — must be first
+import 'dotenv/config'   // loads + validates .env — must be first
 
 import express from 'express'
 import cors from 'cors'

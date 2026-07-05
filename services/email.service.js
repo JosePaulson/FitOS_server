@@ -301,7 +301,7 @@ function init() {
  * Used to build SendGrid's { name, email } from object.
  */
 function parseSender(raw) {
-  if (!raw) return { email: 'hello@fitos.in', name: 'FitOS' }
+  if (!raw) return { email: process.env.EMAIL_FROM, name: 'FitOS' }
   const match = raw.match(/^(.+)<([^>]+)>$/)
   if (match) {
     return { name: match[1].trim(), email: match[2].trim() }
@@ -326,7 +326,7 @@ export async function sendEmail({ to, subject, html, text, from, replyTo }) {
 
   init()
 
-  const platformFrom = process.env.EMAIL_FROM || '"FitOS" <hello@fitos.in>'
+  const platformFrom = process.env.EMAIL_FROM || `"FitOS" <${process.env.EMAIL_FROM}>`
   const senderRaw = from || platformFrom
   const fromObj = parseSender(senderRaw)
 

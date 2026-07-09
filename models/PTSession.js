@@ -30,6 +30,13 @@ const ptSessionSchema = new Schema(
     bodyWeight: { type: Number },     // kg
     bodyFat:    { type: Number },     // % (optional)
 
+    // Optional links into the gym's shared catalogs — lets a trainer show
+    // the member exactly which equipment and/or reference workouts (with
+    // demo image/video) this session used, without re-entering that media
+    // per session. Entirely optional; most sessions can leave these empty.
+    equipment: [{ type: Schema.Types.ObjectId, ref: 'Equipment' }],
+    workouts:  [{ type: Schema.Types.ObjectId, ref: 'WorkoutLibrary' }],
+
     // Status
     status: {
       type:    String,

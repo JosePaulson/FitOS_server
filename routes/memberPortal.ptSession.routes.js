@@ -5,6 +5,11 @@ import PTSession from '../models/PTSession.js'
 const router = Router()
 router.use(memberProtect)
 
+// Same shared populate config as the admin PT session routes — lets the
+// member see the equipment/workout media a trainer optionally linked.
+const EQUIPMENT_POPULATE = { path: 'equipment', select: 'name category imageUrl' }
+const WORKOUT_POPULATE   = { path: 'workouts',  select: 'name category imageUrl videoUrl videoDurationSec' }
+
 // ── GET /api/member-portal/pt-sessions ─────────────────────────────────────
 // IMPORTANT: literal sub-paths (/progress/body-weight) must come BEFORE /:id
 router.get('/', async (req, res, next) => {
@@ -15,7 +20,7 @@ router.get('/', async (req, res, next) => {
     if (from || to) {
       filter.date = {}
       if (from) filter.date.$gte = new Date(from)
-      if (to) filter.date.$lte = new Date(to)
+      if (to)   filter.date.$lte = new Date(to)
     }
 
     const [sessions, total] = await Promise.all([
@@ -23,13 +28,15 @@ router.get('/', async (req, res, next) => {
         .sort({ date: -1 })
         .skip((page - 1) * limit)
         .limit(Number(limit))
-        .populate('trainerId', 'name'),
+        .populate('trainerId', 'name')
+        .populate(EQUIPMENT_POPULATE)
+        .populate(WORKOUT_POPULATE),
       PTSession.countDocuments(filter),
     ])
 
     // Compute stats from all sessions (not just current page)
     const allSessions = await PTSession.find({
-      gymId: req.gymId,
+      gymId:    req.gymId,
       memberId: req.memberId,
     }).select('status')
     const totalCompleted = allSessions.filter((s) => s.status === 'completed').length
@@ -51,8 +58,8 @@ router.get('/', async (req, res, next) => {
 router.get('/progress/body-weight', async (req, res, next) => {
   try {
     const sessions = await PTSession.find({
-      gymId: req.gymId,
-      memberId: req.memberId,
+      gymId:      req.gymId,
+      memberId:   req.memberId,
       bodyWeight: { $exists: true, $ne: null },
     })
       .sort({ date: 1 })
@@ -66,7 +73,7 @@ router.get('/progress/body-weight', async (req, res, next) => {
 router.post('/:id/acknowledge', async (req, res, next) => {
   try {
     const session = await PTSession.findOne({
-      _id: req.params.id,
+      _id:      req.params.id,
       memberId: req.memberId,
     })
     if (!session) {
@@ -78,16 +85,13 @@ router.post('/:id/acknowledge', async (req, res, next) => {
 
     // Allow acknowledging past OR same-day sessions only
     const sessionDate = new Date(session.date)
-    let d = new Date()
     sessionDate.setHours(23, 59, 59, 999)
-    console.log(Date.now())
-    console.log(Date.parse(sessionDate))
-    if (session.status !== 'completed' && (Date.parse(sessionDate) > Date.now())) {
+    if (sessionDate > new Date()) {
       return res.status(400).json({ message: 'Cannot acknowledge a future session' })
     }
 
     session.acknowledgedByMember = true
-    session.acknowledgedAt = new Date()
+    session.acknowledgedAt        = new Date()
 
     // Auto-complete when acknowledged — covers both 'scheduled' and 'missed'
     if (session.status === 'scheduled' || session.status === 'missed') {
@@ -97,7 +101,10 @@ router.post('/:id/acknowledge', async (req, res, next) => {
     await session.save()
 
     // Return fresh populated session so the frontend can update immediately
-    const populated = await PTSession.findById(session._id).populate('trainerId', 'name')
+    const populated = await PTSession.findById(session._id)
+      .populate('trainerId', 'name')
+      .populate(EQUIPMENT_POPULATE)
+      .populate(WORKOUT_POPULATE)
     res.json({ message: 'Session acknowledged', session: populated })
   } catch (err) { next(err) }
 })
@@ -107,9 +114,12 @@ router.post('/:id/acknowledge', async (req, res, next) => {
 router.get('/:id', async (req, res, next) => {
   try {
     const session = await PTSession.findOne({
-      _id: req.params.id,
+      _id:      req.params.id,
       memberId: req.memberId,
-    }).populate('trainerId', 'name')
+    })
+      .populate('trainerId', 'name')
+      .populate(EQUIPMENT_POPULATE)
+      .populate(WORKOUT_POPULATE)
     if (!session) return res.status(404).json({ message: 'Session not found' })
     res.json(session)
   } catch (err) { next(err) }

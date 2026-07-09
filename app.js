@@ -1,6 +1,6 @@
 import 'dotenv/config'   // loads + validates .env — must be first
-
 import express from 'express'
+import mongoose from 'mongoose'
 import cors from 'cors'
 import helmet from 'helmet'
 import morgan from 'morgan'
@@ -29,6 +29,10 @@ import memberPortalRoutes from './routes/memberPortal.routes.js'
 import memberPortalChatRoutes from './routes/memberPortal.chat.routes.js'
 import ptSessionRoutes from './routes/ptSession.routes.js'
 import memberPortalPTRoutes from './routes/memberPortal.ptSession.routes.js'
+import equipmentRoutes from './routes/equipment.routes.js'
+import workoutLibraryRoutes from './routes/workoutLibrary.routes.js'
+import memberPortalEquipmentRoutes from './routes/memberPortal.equipment.routes.js'
+// import memberPortalPushRoutes  from './routes/memberPortal.push.routes.js'
 import webhookRoutes from './routes/webhook.routes.js'
 
 // ── Connect DB ────────────────────────────────────────────────────────────
@@ -45,7 +49,7 @@ app.use('/api/webhooks/razorpay', webhookRoutes)
 
 // ── CORS ──────────────────────────────────────────────────────────────────
 app.use(cors({
-  origin: [process.env.CLIENT_URL, process.env.MEMBER_PORTAL_URL, process.env.MEMBER_PORTAL_URL_VERCEL, process.env.CLIENT_URL_VERCEL, 'http://localhost:5173'],
+  origin: [process.env.CLIENT_URL, process.env.MEMBER_PORTAL_URL, process.env.MEMBER_PORTAL_URL_VERCEL, process.env.CLIENT_URL_VERCEL, 'http://localhost:5173', 'http://192.168.0.105:5174', 'http://localhost:8081', 'http://192.168.0.105:8081', 'exp://192.168.0.105:8081'],
   credentials: true,
 }))
 
@@ -78,14 +82,32 @@ app.use('/api/staff', staffRoutes)
 app.use('/api/subscriptions', subscriptionRoutes)
 app.use('/api/saas-admin', saasAdminRoutes)
 app.use('/api/gym', gymRoutes)
+// Specific sub-paths FIRST, catch-all /api/member-portal LAST
 app.use('/api/member-portal/auth', memberPortalAuthRoutes)
-app.use('/api/member-portal', memberPortalRoutes)
 app.use('/api/member-portal/chat', memberPortalChatRoutes)
-app.use('/api/pt-sessions', ptSessionRoutes)
 app.use('/api/member-portal/pt-sessions', memberPortalPTRoutes)
+app.use('/api/member-portal/equipment', memberPortalEquipmentRoutes)
+// app.use('/api/member-portal/push', memberPortalPushRoutes)
+app.use('/api/member-portal', memberPortalRoutes)
+app.use('/api/pt-sessions', ptSessionRoutes)
+app.use('/api/equipment', equipmentRoutes)
+app.use('/api/workout-library', workoutLibraryRoutes)
 
 // ── Health check ──────────────────────────────────────────────────────────
-app.get('/health', (_req, res) => res.json({ status: 'ok', time: new Date().toISOString() }))
+// Deliberately mounted before rate limiting, auth, and DB-dependent logic —
+// this must always respond fast, even if the database is briefly down.
+// Used by uptime pingers (see deployment notes) to keep a Render free-tier
+// instance from spinning down after 15 minutes of inactivity.
+app.get('/health', (_req, res) => {
+  const dbStates = ['disconnected', 'connected', 'connecting', 'disconnecting']
+  res.json({
+    status: 'ok',
+    time: new Date().toISOString(),
+    uptime: Math.floor(process.uptime()),   // seconds since this process started
+    db: dbStates[mongoose.connection.readyState] || 'unknown',
+    environment: process.env.NODE_ENV || 'development',
+  })
+})
 
 // ── 404 ───────────────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ message: 'Route not found' }))

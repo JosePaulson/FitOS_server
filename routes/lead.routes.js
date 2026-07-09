@@ -19,7 +19,7 @@ const INTEREST_MAP = {
   'Migration help': 'migration-help',
 }
 
-// POST /api/leads/enquiry — public
+// POST /api/leads/enquiry — public (platform-level: gym owners enquiring about FitOS)
 router.post('/enquiry',
   [
     body('name').notEmpty().withMessage('Name is required'),
@@ -41,6 +41,42 @@ router.post('/enquiry',
   }
 )
 
+/**
+ * POST /api/leads — staff-authenticated
+ *
+ * Lets any staff member (owner, manager, trainer, receptionist) manually
+ * log a lead for THEIR gym — e.g. a walk-in prospect, a referral, or
+ * someone who called in — so the pipeline isn't limited to whatever comes
+ * through the public digital enquiry form.
+ */
+router.post('/',
+  protect,
+  authorize('owner', 'manager', 'trainer', 'receptionist'),
+  [
+    body('name').notEmpty().withMessage('Name is required'),
+    body('phone').notEmpty().withMessage('Phone is required'),
+  ],
+  async (req, res, next) => {
+    if (!validate(req, res)) return
+    try {
+      const { name, phone, email, interest, source, message } = req.body
+
+      const lead = await Lead.create({
+        gymId:     req.gymId,
+        name, phone, email,
+        interest:  interest || 'membership',
+        source:    source   || 'walk-in',
+        message,
+        stage:     'new',
+        createdBy: req.user._id,
+      })
+
+      const populated = await lead.populate('createdBy', 'name')
+      res.status(201).json(populated)
+    } catch (err) { next(err) }
+  }
+)
+
 // GET /api/leads
 router.get('/', protect, async (req, res, next) => {
   try {
@@ -49,7 +85,12 @@ router.get('/', protect, async (req, res, next) => {
     if (stage) filter.stage = stage
 
     const [leads, total] = await Promise.all([
-      Lead.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(Number(limit)).populate('assignedTo', 'name'),
+      Lead.find(filter)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(Number(limit))
+        .populate('assignedTo', 'name')
+        .populate('createdBy', 'name'),
       Lead.countDocuments(filter),
     ])
     res.json({ leads, total, page: Number(page), pages: Math.ceil(total / limit) })
@@ -59,7 +100,9 @@ router.get('/', protect, async (req, res, next) => {
 // GET /api/leads/:id
 router.get('/:id', protect, async (req, res, next) => {
   try {
-    const lead = await Lead.findOne({ _id: req.params.id, gymId: req.gymId }).populate('assignedTo', 'name email')
+    const lead = await Lead.findOne({ _id: req.params.id, gymId: req.gymId })
+      .populate('assignedTo', 'name email')
+      .populate('createdBy', 'name')
     if (!lead) return res.status(404).json({ message: 'Lead not found' })
     res.json(lead)
   } catch (err) { next(err) }

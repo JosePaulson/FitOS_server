@@ -1,9 +1,9 @@
 import { Router } from 'express'
 import { body, validationResult } from 'express-validator'
 import PTSession from '../models/PTSession.js'
-import Member from '../models/Member.js'
+import Member    from '../models/Member.js'
 import { protect, authorize } from '../middleware/auth.js'
-// import { sendPushToMember } from '../services/pushNotification.service.js'
+import { sendPushToMember } from '../services/pushNotification.service.js'
 
 const router = Router()
 
@@ -11,7 +11,7 @@ const router = Router()
 // fields (image/video) available wherever a session is returned, without
 // repeating this list at every route.
 const EQUIPMENT_POPULATE = { path: 'equipment', select: 'name category imageUrl' }
-const WORKOUT_POPULATE = { path: 'workouts', select: 'name category imageUrl videoUrl videoDurationSec' }
+const WORKOUT_POPULATE   = { path: 'workouts',  select: 'name category imageUrl videoUrl videoDurationSec' }
 
 function validate(req, res) {
   const errs = validationResult(req)
@@ -26,8 +26,8 @@ router.get('/', protect, authorize('owner', 'manager', 'trainer'), async (req, r
     const { memberId, trainerId, status, from, to, page = 1, limit = 20 } = req.query
     const filter = { gymId: req.gymId }
 
-    if (memberId) filter.memberId = memberId
-    if (status) filter.status = status
+    if (memberId)  filter.memberId  = memberId
+    if (status)    filter.status    = status
 
     // Trainers only see their own sessions unless owner/manager
     if (req.user.role === 'trainer') {
@@ -39,7 +39,7 @@ router.get('/', protect, authorize('owner', 'manager', 'trainer'), async (req, r
     if (from || to) {
       filter.date = {}
       if (from) filter.date.$gte = new Date(from)
-      if (to) filter.date.$lte = new Date(to)
+      if (to)   filter.date.$lte = new Date(to)
     }
 
     const [sessions, total] = await Promise.all([
@@ -47,7 +47,7 @@ router.get('/', protect, authorize('owner', 'manager', 'trainer'), async (req, r
         .sort({ date: -1 })
         .skip((page - 1) * limit)
         .limit(Number(limit))
-        .populate('memberId', 'name phone')
+        .populate('memberId',  'name phone')
         .populate('trainerId', 'name')
         .populate(EQUIPMENT_POPULATE)
         .populate(WORKOUT_POPULATE),
@@ -62,7 +62,7 @@ router.get('/', protect, authorize('owner', 'manager', 'trainer'), async (req, r
 router.get('/:id', protect, authorize('owner', 'manager', 'trainer'), async (req, res, next) => {
   try {
     const session = await PTSession.findOne({ _id: req.params.id, gymId: req.gymId })
-      .populate('memberId', 'name phone email')
+      .populate('memberId',  'name phone email')
       .populate('trainerId', 'name')
       .populate(EQUIPMENT_POPULATE)
       .populate(WORKOUT_POPULATE)
@@ -93,23 +93,23 @@ router.post('/',
         : (req.body.trainerId || req.user._id)
 
       const session = await PTSession.create({
-        gymId: req.gymId,
+        gymId:      req.gymId,
         memberId,
         trainerId,
-        date: new Date(date),
-        title: title || '',
-        notes: notes || '',
-        exercises: exercises || [],
+        date:       new Date(date),
+        title:      title || '',
+        notes:      notes || '',
+        exercises:  exercises || [],
         bodyWeight,
         bodyFat,
-        status: status || 'scheduled',
+        status:     status || 'scheduled',
         // Both optional — a trainer doesn't have to link anything
-        equipment: equipment || [],
-        workouts: workouts || [],
+        equipment:  equipment || [],
+        workouts:   workouts  || [],
       })
 
       const populated = await session.populate([
-        { path: 'memberId', select: 'name phone' },
+        { path: 'memberId',  select: 'name phone' },
         { path: 'trainerId', select: 'name' },
         EQUIPMENT_POPULATE,
         WORKOUT_POPULATE,
@@ -126,7 +126,7 @@ router.patch('/:id',
   authorize('owner', 'manager', 'trainer'),
   async (req, res, next) => {
     try {
-      const allowed = ['date', 'title', 'notes', 'exercises', 'bodyWeight', 'bodyFat', 'status', 'trainerId', 'equipment', 'workouts']
+      const allowed = ['date','title','notes','exercises','bodyWeight','bodyFat','status','trainerId','equipment','workouts']
       const updates = {}
       allowed.forEach((k) => { if (req.body[k] !== undefined) updates[k] = req.body[k] })
 
@@ -135,7 +135,7 @@ router.patch('/:id',
       if (req.user.role === 'trainer') filter.trainerId = req.user._id
 
       const session = await PTSession.findOneAndUpdate(filter, updates, { new: true, runValidators: true })
-        .populate('memberId', 'name phone')
+        .populate('memberId',  'name phone')
         .populate('trainerId', 'name')
         .populate(EQUIPMENT_POPULATE)
         .populate(WORKOUT_POPULATE)
@@ -149,9 +149,9 @@ router.patch('/:id',
         : `Your PT session on ${sessionDate} was updated.`
       sendPushToMember(session.memberId?._id || session.memberId, {
         title: 'PT session updated',
-        body: bodyText,
-        url: '/workouts',
-        tag: 'pt-session-updated',
+        body:  bodyText,
+        url:   '/workouts',
+        tag:   'pt-session-updated',
       }).catch((e) => console.error('[push] PT session update failed:', e.message))
 
       res.json(session)
@@ -199,8 +199,8 @@ router.post('/:id/body-weight',
 router.get('/member/:memberId/progress', protect, authorize('owner', 'manager', 'trainer'), async (req, res, next) => {
   try {
     const sessions = await PTSession.find({
-      gymId: req.gymId,
-      memberId: req.params.memberId,
+      gymId:      req.gymId,
+      memberId:   req.params.memberId,
       bodyWeight: { $exists: true, $ne: null },
     })
       .sort({ date: 1 })

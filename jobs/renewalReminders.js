@@ -2,7 +2,9 @@ import cron   from 'node-cron'
 import Member from '../models/Member.js'
 import Gym    from '../models/Gym.js'
 import { sendRenewalReminder }   from '../services/email.service.js'
+import { resolveGymSender }       from '../utils/gymEmailSender.js'
 import { sendRenewalReminderWA } from '../services/whatsapp.service.js'
+import { sendPushToMember }      from '../services/pushNotification.service.js'
 
 export function startRenewalReminderJob() {
   // 9 AM IST = 3:30 AM UTC
@@ -28,14 +30,23 @@ export function startRenewalReminderJob() {
 
         const expiryDate = member.membershipExpiryDate.toLocaleDateString('en-IN')
 
+        // Resolve gym's own sender address for the reminder email
+        const { from, replyTo, gymName } = await resolveGymSender(member.gymId)
+
         if (member.email) {
-          sendRenewalReminder({ to: member.email, memberName: member.name, gymName: gym.name, expiryDate, daysLeft: days })
+          sendRenewalReminder({ to: member.email, from, replyTo, memberName: member.name, gymName, expiryDate, daysLeft: days })
             .catch((e) => console.error('[cron:renewal] Email error:', e.message))
         }
         if (member.phone) {
-          sendRenewalReminderWA({ phone: member.phone, memberName: member.name, gymName: gym.name, expiryDate, daysLeft: days })
+          sendRenewalReminderWA({ phone: member.phone, memberName: member.name, gymName, expiryDate, daysLeft: days })
             .catch((e) => console.error('[cron:renewal] WA error:', e.message))
         }
+        sendPushToMember(member._id, {
+          title: `Membership expires in ${days} day${days === 1 ? '' : 's'}`,
+          body:  `Your membership expires on ${expiryDate}. Renew soon to keep your access.`,
+          url:   '/plans',
+          tag:   'renewal-reminder',
+        }).catch((e) => console.error('[cron:renewal] Push error:', e.message))
       }
     }
 

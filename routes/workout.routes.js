@@ -2,8 +2,27 @@ import { Router } from 'express'
 import WorkoutPlan from '../models/WorkoutPlan.js'
 import DietPlan    from '../models/DietPlan.js'
 import { protect, authorize } from '../middleware/auth.js'
+import { sendPushToMembers } from '../services/pushNotification.service.js'
+import { seedPrebuiltPlansForGym } from '../utils/seedPrebuiltPlans.js'
 
 const router = Router()
+
+// POST /api/workout-plans/seed-templates
+// Lets an existing gym (registered before this feature existed) pull in
+// the same starter workout/diet library that new gyms get automatically.
+// Safe to call repeatedly — a no-op once templates already exist.
+router.post('/seed-templates', protect, authorize('owner', 'manager'), async (req, res, next) => {
+  try {
+    const result = await seedPrebuiltPlansForGym(req.gymId)
+    const total = result.workoutsAdded + result.dietsAdded
+    res.json({
+      message: total > 0
+        ? `Added ${result.workoutsAdded} workout plan(s) and ${result.dietsAdded} diet plan(s).`
+        : 'Starter plans are already loaded for this gym.',
+      ...result,
+    })
+  } catch (err) { next(err) }
+})
 
 // ── Workout Plans ──────────────────────────────────────────────────────────
 
@@ -42,6 +61,17 @@ router.patch('/workout/:id', protect, authorize('owner', 'manager', 'trainer'), 
     allowed.forEach((k) => { if (req.body[k] !== undefined) updates[k] = req.body[k] })
     const plan = await WorkoutPlan.findOneAndUpdate({ _id: req.params.id, gymId: req.gymId }, updates, { new: true })
     if (!plan) return res.status(404).json({ message: 'Workout plan not found' })
+
+    // Notify every member this plan is currently assigned to — fire-and-forget
+    if (plan.assignedTo?.length) {
+      sendPushToMembers(plan.assignedTo, {
+        title: 'Workout plan updated',
+        body:  `"${plan.name}" was just updated by your gym.`,
+        url:   '/workouts',
+        tag:   'workout-updated',
+      }).catch((e) => console.error('[push] workout update failed:', e.message))
+    }
+
     res.json(plan)
   } catch (err) { next(err) }
 })
@@ -52,6 +82,14 @@ router.post('/workout/:id/assign', protect, authorize('owner', 'manager', 'train
     if (!Array.isArray(memberIds) || !memberIds.length) return res.status(400).json({ message: 'memberIds array required' })
     const plan = await WorkoutPlan.findOneAndUpdate({ _id: req.params.id, gymId: req.gymId }, { $addToSet: { assignedTo: { $each: memberIds } } }, { new: true })
     if (!plan) return res.status(404).json({ message: 'Workout plan not found' })
+
+    sendPushToMembers(memberIds, {
+      title: 'New workout plan assigned',
+      body:  `"${plan.name}" was just assigned to you.`,
+      url:   '/workouts',
+      tag:   'workout-updated',
+    }).catch((e) => console.error('[push] workout assign failed:', e.message))
+
     res.json(plan)
   } catch (err) { next(err) }
 })
@@ -92,6 +130,16 @@ router.patch('/diet/:id', protect, authorize('owner', 'manager', 'trainer'), asy
     allowed.forEach((k) => { if (req.body[k] !== undefined) updates[k] = req.body[k] })
     const plan = await DietPlan.findOneAndUpdate({ _id: req.params.id, gymId: req.gymId }, updates, { new: true })
     if (!plan) return res.status(404).json({ message: 'Diet plan not found' })
+
+    if (plan.assignedTo?.length) {
+      sendPushToMembers(plan.assignedTo, {
+        title: 'Diet plan updated',
+        body:  `"${plan.name}" was just updated by your gym.`,
+        url:   '/workouts',
+        tag:   'diet-updated',
+      }).catch((e) => console.error('[push] diet update failed:', e.message))
+    }
+
     res.json(plan)
   } catch (err) { next(err) }
 })
@@ -101,6 +149,14 @@ router.post('/diet/:id/assign', protect, authorize('owner', 'manager', 'trainer'
     const { memberIds } = req.body
     const plan = await DietPlan.findOneAndUpdate({ _id: req.params.id, gymId: req.gymId }, { $addToSet: { assignedTo: { $each: memberIds } } }, { new: true })
     if (!plan) return res.status(404).json({ message: 'Diet plan not found' })
+
+    sendPushToMembers(memberIds || [], {
+      title: 'New diet plan assigned',
+      body:  `"${plan.name}" was just assigned to you.`,
+      url:   '/workouts',
+      tag:   'diet-updated',
+    }).catch((e) => console.error('[push] diet assign failed:', e.message))
+
     res.json(plan)
   } catch (err) { next(err) }
 })

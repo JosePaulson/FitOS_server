@@ -1,12 +1,13 @@
 import { Router } from 'express'
 import { body, validationResult } from 'express-validator'
-import Member from '../models/Member.js'
+import Member         from '../models/Member.js'
 import MembershipPlan from '../models/MembershipPlan.js'
-import Invoice from '../models/Invoice.js'
-import Gym from '../models/Gym.js'
-import { protect, authorize } from '../middleware/auth.js'
-import { extractTax } from '../utils/tax.js'
+import Invoice        from '../models/Invoice.js'
+import { protect, authorize }  from '../middleware/auth.js'
+import { extractTax }          from '../utils/tax.js'
 import { sendWelcomeEmail, sendInvoiceEmail } from '../services/email.service.js'
+import { resolveGymSender }                     from '../utils/gymEmailSender.js'
+import { sendPushToMember }                     from '../services/pushNotification.service.js'
 
 const router = Router()
 
@@ -21,13 +22,13 @@ function buildInvoicePayload(gymId, memberId, plan) {
   const { baseAmount, taxAmount, totalAmount } = extractTax(plan.price, plan.taxRate ?? 18)
   return {
     gymId, memberId,
-    planId: plan._id,
+    planId:      plan._id,
     baseAmount,
-    taxRate: plan.taxRate ?? 18,
+    taxRate:     plan.taxRate ?? 18,
     taxAmount,
     totalAmount,
-    status: 'pending',
-    dueDate: new Date(),
+    status:      'pending',
+    dueDate:     new Date(),
   }
 }
 
@@ -36,10 +37,22 @@ function buildInvoicePayload(gymId, memberId, plan) {
  * Uses fire-and-forget (.catch) so email failure never breaks the API response.
  */
 async function fireEnrolmentEmails({ member, invoice, plan, gymId, isRenewal = false }) {
-  if (!member.email) return   // no email address — skip silently
+  // Push notification — independent of whether the member has an email on
+  // file; it works off the member's browser subscription instead.
+  sendPushToMember(member._id, {
+    title: isRenewal ? 'Membership renewed 🎉' : 'Invoice ready',
+    body:  isRenewal
+      ? `Your "${plan.name}" membership was renewed. Receipt: ₹${invoice.totalAmount.toLocaleString('en-IN')}`
+      : `New invoice for "${plan.name}" — ₹${invoice.totalAmount.toLocaleString('en-IN')}`,
+    url:   '/billing',
+    tag:   'invoice',
+  }).catch((e) => console.error('[push] Invoice notification failed:', e.message))
 
-  const gym = await Gym.findById(gymId).select('name')
-  const gymName = gym?.name || 'your gym'
+  if (!member.email) return   // no email address — skip email sends only
+
+  // Resolve gym's own sender address (falls back to platform email if not set)
+  const { from, replyTo, gymName } = await resolveGymSender(gymId)
+
   const expiryDate = member.membershipExpiryDate?.toLocaleDateString('en-IN', {
     day: 'numeric', month: 'long', year: 'numeric',
   })
@@ -47,25 +60,23 @@ async function fireEnrolmentEmails({ member, invoice, plan, gymId, isRenewal = f
   if (!isRenewal) {
     // Welcome email — only on first enrolment
     sendWelcomeEmail({
-      to: member.email,
+      to: member.email, from, replyTo,
       memberName: member.name,
-      gymName,
-      planName: plan.name,
-      expiryDate,
+      gymName, planName: plan.name, expiryDate,
     }).catch((e) => console.error('[email] Welcome email failed:', e.message))
   }
 
   // Invoice / receipt email — on both enrolment and renewal
   sendInvoiceEmail({
-    to: member.email,
-    memberName: member.name,
+    to: member.email, from, replyTo,
+    memberName:    member.name,
     gymName,
     invoiceNumber: invoice.invoiceNumber,
-    planName: plan.name,
-    baseAmount: invoice.baseAmount,
-    taxRate: invoice.taxRate,
-    taxAmount: invoice.taxAmount,
-    totalAmount: invoice.totalAmount,
+    planName:      plan.name,
+    baseAmount:    invoice.baseAmount,
+    taxRate:       invoice.taxRate,
+    taxAmount:     invoice.taxAmount,
+    totalAmount:   invoice.totalAmount,
   }).catch((e) => console.error('[email] Invoice email failed:', e.message))
 }
 
@@ -77,7 +88,7 @@ router.get('/', protect, async (req, res, next) => {
     if (status) filter.membershipStatus = status
     if (search) {
       filter.$or = [
-        { name: { $regex: search, $options: 'i' } },
+        { name:  { $regex: search, $options: 'i' } },
         { phone: { $regex: search, $options: 'i' } },
         { email: { $regex: search, $options: 'i' } },
       ]
@@ -127,7 +138,7 @@ router.post('/',
       const plan = await MembershipPlan.findOne({ _id: planId, gymId: req.gymId })
       if (!plan) return res.status(404).json({ message: 'Plan not found' })
 
-      const startDate = new Date()
+      const startDate  = new Date()
       const expiryDate = new Date(startDate)
       expiryDate.setDate(expiryDate.getDate() + plan.durationDays)
 
@@ -151,7 +162,7 @@ router.post('/',
 // PATCH /api/members/:id
 router.patch('/:id', protect, authorize('owner', 'manager'), async (req, res, next) => {
   try {
-    const allowed = ['name', 'phone', 'email', 'dob', 'gender', 'photo', 'emergencyContact', 'healthNotes', 'assignedTrainerId', 'membershipStatus', 'source']
+    const allowed = ['name','phone','email','dob','gender','photo','emergencyContact','healthNotes','assignedTrainerId','membershipStatus','source']
     const updates = {}
     allowed.forEach((k) => { if (req.body[k] !== undefined) updates[k] = req.body[k] })
 
@@ -180,8 +191,8 @@ router.post('/:id/renew', protect, authorize('owner', 'manager', 'receptionist')
       : new Date()
     base.setDate(base.getDate() + plan.durationDays)
 
-    member.currentPlanId = plan._id
-    member.membershipStatus = 'active'
+    member.currentPlanId        = plan._id
+    member.membershipStatus     = 'active'
     member.membershipExpiryDate = base
     await member.save()
 

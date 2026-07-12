@@ -4,6 +4,7 @@ import { body, validationResult } from 'express-validator'
 import Gym  from '../models/Gym.js'
 import User from '../models/User.js'
 import { protect } from '../middleware/auth.js'
+import { seedPrebuiltPlansForGym } from '../utils/seedPrebuiltPlans.js'
 
 const router = Router()
 
@@ -43,6 +44,13 @@ router.post('/register',
       const user = await User.create({ gymId: gym._id, name, email, passwordHash: password, role: 'owner' })
       gym.ownerUserId = user._id
       await gym.save()
+
+      // Give the new gym a ready-to-use starter library of workout/diet
+      // plans so the dashboard isn't empty on day one. Non-blocking — a
+      // seeding hiccup should never stop registration from completing.
+      seedPrebuiltPlansForGym(gym._id).catch((e) =>
+        console.error('[register] Failed to seed prebuilt plans:', e.message)
+      )
 
       const accessToken  = signAccess(user._id)
       const refreshToken = signRefresh(user._id)

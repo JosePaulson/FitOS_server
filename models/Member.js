@@ -4,25 +4,27 @@ const memberSchema = new Schema(
   {
     gymId: { type: Schema.Types.ObjectId, ref: 'Gym', required: true, index: true },
 
-    name:   { type: String, required: true, trim: true },
-    phone:  { type: String, required: true, trim: true },
-    email:  { type: String, lowercase: true, trim: true },
-    dob:    { type: Date },
+    name: { type: String, required: true, trim: true },
+    phone: { type: String, required: true, trim: true },
+    email: { type: String, lowercase: true, trim: true },
+    dob: { type: Date },     // optional — also powers birthday greetings
+    age: { type: Number },   // optional — for members who'd rather not share a DOB
     gender: { type: String, enum: ['male', 'female', 'other'] },
-    photo:  { type: String },
+    height: { type: Number },   // cm, optional — used for calorie-burn estimates on PT sessions
+    photo: { type: String },
 
     emergencyContact: {
-      name:     String,
-      phone:    String,
+      name: String,
+      phone: String,
       relation: String,
     },
     healthNotes: { type: String },
 
-    currentPlanId:        { type: Schema.Types.ObjectId, ref: 'MembershipPlan' },
-    membershipStatus:     { type: String, enum: ['active', 'expired', 'paused', 'cancelled'], default: 'active' },
-    membershipStartDate:  { type: Date },
+    currentPlanId: { type: Schema.Types.ObjectId, ref: 'MembershipPlan' },
+    membershipStatus: { type: String, enum: ['active', 'expired', 'paused', 'cancelled'], default: 'active' },
+    membershipStartDate: { type: Date },
     membershipExpiryDate: { type: Date, index: true },
-    assignedTrainerId:    { type: Schema.Types.ObjectId, ref: 'User' },
+    assignedTrainerId: { type: Schema.Types.ObjectId, ref: 'User' },
 
     source: {
       type: String,

@@ -6,6 +6,8 @@ import Invoice from '../models/Invoice.js'
 import Attendance from '../models/Attendance.js'
 import WorkoutPlan from '../models/WorkoutPlan.js'
 import DietPlan from '../models/DietPlan.js'
+import { uploadImage, handleUploadErrors } from '../middleware/upload.js'
+import { uploadImageBuffer, deleteAsset } from '../services/cloudinaryUpload.service.js'
 
 const router = Router()
 
@@ -21,6 +23,96 @@ router.get('/me', async (req, res, next) => {
       .populate('currentPlanId', 'name price durationDays taxRate taxAmount baseAmount')
       .populate('assignedTrainerId', 'name phone')
     if (!member) return res.status(404).json({ message: 'Member not found' })
+    res.json(member)
+  } catch (err) { next(err) }
+})
+
+/**
+ * PATCH /api/member-portal/me — self-service profile update.
+ * Deliberately scoped to fields a member can safely change themselves:
+ * age, height, and medical conditions (stored in healthNotes, same field
+ * staff see/set from the admin dashboard). Name/phone/email/DOB stay
+ * admin-managed since they're tied to identity/verification.
+ */
+router.patch('/me', async (req, res, next) => {
+  try {
+    const { age, height, healthNotes } = req.body
+    const updates = {}
+
+    if (age !== undefined) {
+      if (age === null || age === '') {
+        updates.age = null
+      } else {
+        const n = Number(age)
+        if (!Number.isFinite(n) || n < 0 || n > 120) {
+          return res.status(400).json({ message: 'Enter a valid age (0–120)' })
+        }
+        updates.age = n
+      }
+    }
+
+    if (height !== undefined) {
+      if (height === null || height === '') {
+        updates.height = null
+      } else {
+        const n = Number(height)
+        if (!Number.isFinite(n) || n < 30 || n > 250) {
+          return res.status(400).json({ message: 'Enter a valid height in cm (30–250)' })
+        }
+        updates.height = n
+      }
+    }
+
+    if (healthNotes !== undefined) {
+      if (String(healthNotes).length > 1000) {
+        return res.status(400).json({ message: 'Keep medical conditions under 1000 characters' })
+      }
+      updates.healthNotes = healthNotes
+    }
+
+    const member = await Member.findOneAndUpdate(
+      { _id: req.memberId, gymId: req.gymId },
+      updates,
+      { new: true, runValidators: true }
+    )
+      .populate('currentPlanId', 'name price durationDays taxRate taxAmount baseAmount')
+      .populate('assignedTrainerId', 'name phone')
+
+    if (!member) return res.status(404).json({ message: 'Member not found' })
+    res.json(member)
+  } catch (err) { next(err) }
+})
+
+/** POST /api/member-portal/me/photo — upload/replace profile photo */
+router.post('/me/photo', handleUploadErrors(uploadImage), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: 'No photo uploaded' })
+
+    const member = await Member.findOne({ _id: req.memberId, gymId: req.gymId })
+    if (!member) return res.status(404).json({ message: 'Member not found' })
+
+    const uploaded = await uploadImageBuffer(req.file.buffer, 'fitos/members')
+    if (member.photoPublicId) await deleteAsset(member.photoPublicId, 'image') // swap out the old one
+
+    member.photo = uploaded.url
+    member.photoPublicId = uploaded.publicId
+    await member.save()
+
+    res.json(member)
+  } catch (err) { next(err) }
+})
+
+/** DELETE /api/member-portal/me/photo — remove profile photo */
+router.delete('/me/photo', async (req, res, next) => {
+  try {
+    const member = await Member.findOne({ _id: req.memberId, gymId: req.gymId })
+    if (!member) return res.status(404).json({ message: 'Member not found' })
+
+    if (member.photoPublicId) await deleteAsset(member.photoPublicId, 'image')
+    member.photo = ''
+    member.photoPublicId = ''
+    await member.save()
+
     res.json(member)
   } catch (err) { next(err) }
 })
@@ -119,6 +211,34 @@ router.get('/attendance/summary', async (req, res, next) => {
       { $limit: 6 },
     ])
     res.json(summary)
+  } catch (err) { next(err) }
+})
+
+/* ── PT Sessions ──────────────────────────────────────────────────────────── */
+
+/** GET /api/member-portal/pt-sessions */
+router.get('/pt-sessions', async (req, res, next) => {
+  try {
+    const sessions = await Attendance.find({
+      gymId: req.gymId,
+      memberId: req.memberId,
+      type: 'pt',
+    })
+      .sort({ date: -1 })
+      .populate('trainerId', 'name')
+
+    const totalSessions = sessions.length
+
+    // Sessions included in current plan
+    const member = await Member.findById(req.memberId).populate('currentPlanId', 'sessionsIncluded')
+    const sessionsIncluded = member?.currentPlanId?.sessionsIncluded || 0
+
+    res.json({
+      sessions,
+      totalSessions,
+      sessionsIncluded,
+      sessionsRemaining: sessionsIncluded > 0 ? Math.max(0, sessionsIncluded - totalSessions) : null,
+    })
   } catch (err) { next(err) }
 })
 

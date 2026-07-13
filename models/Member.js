@@ -12,13 +12,14 @@ const memberSchema = new Schema(
     gender: { type: String, enum: ['male', 'female', 'other'] },
     height: { type: Number },   // cm, optional — used for calorie-burn estimates on PT sessions
     photo: { type: String },
+    photoPublicId: { type: String }, // Cloudinary public_id, so a replaced/removed photo can be cleaned up
 
     emergencyContact: {
       name: String,
       phone: String,
       relation: String,
     },
-    healthNotes: { type: String },
+    healthNotes: { type: String }, // free text — editable by staff, and by the member themselves (medical conditions) in the member portal
 
     currentPlanId: { type: Schema.Types.ObjectId, ref: 'MembershipPlan' },
     membershipStatus: { type: String, enum: ['active', 'expired', 'paused', 'cancelled'], default: 'active' },

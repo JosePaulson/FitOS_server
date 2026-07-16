@@ -307,7 +307,7 @@ router.post('/:id/acknowledge', async (req, res, next) => {
     // Allow acknowledging past OR same-day sessions only
     const sessionDate = new Date(session.date)
     sessionDate.setHours(23, 59, 59, 999)
-    if (sessionDate > new Date()) {
+    if (session.status !== 'completed' && sessionDate > new Date()) {
       return res.status(400).json({ message: 'Cannot acknowledge a future session' })
     }
 

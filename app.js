@@ -33,6 +33,7 @@ import equipmentRoutes from './routes/equipment.routes.js'
 import workoutLibraryRoutes from './routes/workoutLibrary.routes.js'
 import memberPortalEquipmentRoutes from './routes/memberPortal.equipment.routes.js'
 import memberPortalPushRoutes from './routes/memberPortal.push.routes.js'
+import memberPortalFoodScanRoutes from './routes/memberPortal.foodScan.routes.js'
 import webhookRoutes from './routes/webhook.routes.js'
 
 // ── Connect DB ────────────────────────────────────────────────────────────
@@ -88,6 +89,7 @@ app.use('/api/member-portal/chat', memberPortalChatRoutes)
 app.use('/api/member-portal/pt-sessions', memberPortalPTRoutes)
 app.use('/api/member-portal/equipment', memberPortalEquipmentRoutes)
 app.use('/api/member-portal/push', memberPortalPushRoutes)
+app.use('/api/member-portal/food-scan', memberPortalFoodScanRoutes)
 app.use('/api/member-portal', memberPortalRoutes)
 app.use('/api/pt-sessions', ptSessionRoutes)
 app.use('/api/equipment', equipmentRoutes)

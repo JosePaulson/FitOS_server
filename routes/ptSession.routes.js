@@ -27,6 +27,7 @@ function validate(req, res) {
  * calorie tracking is a bonus, not something that should block a save.
  */
 async function resolveCalories({ gymId, memberId, excludeId, bodyWeight, durationMinutes, exercises }) {
+  if (exercises?.length === 0 || !durationMinutes) return null
   let weightKg = Number(bodyWeight) || null
   if (!weightKg) {
     const last = await PTSession.findOne({

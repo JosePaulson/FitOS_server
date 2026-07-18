@@ -212,7 +212,9 @@ router.post('/request',
 )
 
 // ── POST /api/member-portal/pt-sessions/:id/cancel ──────────────────────────
-// A member withdraws their own pending or not-yet-happened booking.
+// A member withdraws their own pending or not-yet-happened booking. Deletes
+// the record entirely (rather than soft-cancelling) — a withdrawn request
+// shouldn't linger in the trainer's/gym's history.
 // MUST be before /:id.
 router.post('/:id/cancel', async (req, res, next) => {
   try {
@@ -225,9 +227,8 @@ router.post('/:id/cancel', async (req, res, next) => {
       return res.status(400).json({ message: 'Cannot cancel a session that has already passed' })
     }
 
-    session.status = 'cancelled'
-    await session.save()
-    res.json({ message: 'Booking cancelled', session })
+    await session.deleteOne()
+    res.json({ message: 'Booking cancelled' })
   } catch (err) { next(err) }
 })
 

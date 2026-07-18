@@ -10,12 +10,15 @@ import connectDB from './config/db.js'
 import errorHandler from './middleware/errorHandler.js'
 import { startRenewalReminderJob } from './jobs/renewalReminders.js'
 import { startBirthdayJob } from './jobs/birthdayGreetings.js'
+import { startPTPlanReminderJob } from './jobs/ptPlanReminders.js'
 
 // ── Routes ────────────────────────────────────────────────────────────────
 import authRoutes from './routes/auth.routes.js'
 import leadRoutes from './routes/lead.routes.js'
 import memberRoutes from './routes/member.routes.js'
 import planRoutes from './routes/plan.routes.js'
+import ptPlanRoutes from './routes/ptPlan.routes.js'
+import memberPTPlanRoutes from './routes/memberPTPlan.routes.js'
 import invoiceRoutes from './routes/invoice.routes.js'
 import attendanceRoutes from './routes/attendance.routes.js'
 import dashboardRoutes from './routes/dashboard.routes.js'
@@ -34,6 +37,9 @@ import workoutLibraryRoutes from './routes/workoutLibrary.routes.js'
 import memberPortalEquipmentRoutes from './routes/memberPortal.equipment.routes.js'
 import memberPortalPushRoutes from './routes/memberPortal.push.routes.js'
 import memberPortalFoodScanRoutes from './routes/memberPortal.foodScan.routes.js'
+import memberPortalPTPlanRoutes from './routes/memberPortal.ptPlan.routes.js'
+import memberPortalAttendanceCheckinRoutes from './routes/memberPortal.attendanceCheckin.routes.js'
+import memberPortalWorkoutLogRoutes from './routes/memberPortal.workoutLog.routes.js'
 import webhookRoutes from './routes/webhook.routes.js'
 
 // ── Connect DB ────────────────────────────────────────────────────────────
@@ -59,15 +65,21 @@ app.use(express.json({ limit: '5mb' }))
 app.use(express.urlencoded({ extended: true }))
 
 // ── Rate limiters ─────────────────────────────────────────────────────────
+const rateLimitHandler = (req, res, _next, options) => {
+  res.status(options.statusCode).json({ message: options.message })
+}
+
 app.use('/api', rateLimit({
   windowMs: 15 * 60 * 1000, max: 200,
   standardHeaders: true, legacyHeaders: false,
   message: 'Too many requests, please try again later.',
+  handler: rateLimitHandler,
 }))
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, max: 20,
   message: 'Too many auth attempts, please try again later.',
+  handler: rateLimitHandler,
 })
 
 // ── Mount routes ──────────────────────────────────────────────────────────
@@ -75,6 +87,8 @@ app.use('/api/auth', authLimiter, authRoutes)
 app.use('/api/leads', leadRoutes)
 app.use('/api/members', memberRoutes)
 app.use('/api/plans', planRoutes)
+app.use('/api/pt-plans', ptPlanRoutes)
+app.use('/api/member-pt-plans', memberPTPlanRoutes)
 app.use('/api/invoices', invoiceRoutes)
 app.use('/api/attendance', attendanceRoutes)
 app.use('/api/dashboard', dashboardRoutes)
@@ -90,6 +104,9 @@ app.use('/api/member-portal/pt-sessions', memberPortalPTRoutes)
 app.use('/api/member-portal/equipment', memberPortalEquipmentRoutes)
 app.use('/api/member-portal/push', memberPortalPushRoutes)
 app.use('/api/member-portal/food-scan', memberPortalFoodScanRoutes)
+app.use('/api/member-portal/pt-plans', memberPortalPTPlanRoutes)
+app.use('/api/member-portal/attendance', memberPortalAttendanceCheckinRoutes)
+app.use('/api/member-portal/workout-logs', memberPortalWorkoutLogRoutes)
 app.use('/api/member-portal', memberPortalRoutes)
 app.use('/api/pt-sessions', ptSessionRoutes)
 app.use('/api/equipment', equipmentRoutes)
@@ -121,6 +138,7 @@ app.use(errorHandler)
 if (process.env.NODE_ENV !== 'test') {
   startRenewalReminderJob()
   startBirthdayJob()
+  startPTPlanReminderJob()
 }
 
 // ── Start server ──────────────────────────────────────────────────────────

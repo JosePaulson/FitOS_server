@@ -13,6 +13,11 @@ const attendanceSchema = new Schema(
     classId:   { type: Schema.Types.ObjectId, ref: 'Class' },
     trainerId: { type: Schema.Types.ObjectId, ref: 'User' },
     notes:     { type: String },
+
+    // How this record was created — staff marking it manually vs a member
+    // self-checking-in from the portal because they were within the gym's
+    // geofence radius.
+    method: { type: String, enum: ['manual', 'geofence'], default: 'manual' },
   },
   { timestamps: true }
 )

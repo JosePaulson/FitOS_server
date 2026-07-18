@@ -130,7 +130,7 @@ router.get('/me', memberProtect, async (req, res, next) => {
   try {
     const member = await Member.findById(req.memberId)
       .populate('currentPlanId', 'name price durationDays taxRate')
-    const gym = await Gym.findById(req.gymId).select('name subdomain logo settings')
+    const gym = await Gym.findById(req.gymId).select('name subdomain logo settings location')
     res.json({ member, gym })
   } catch (err) { next(err) }
 })

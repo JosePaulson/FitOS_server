@@ -41,6 +41,9 @@ router.patch('/settings',
         if (!emailRegex.test(val)) throw new Error('Invalid reply-to email address')
         return true
       }),
+    body('location.lat').optional({ nullable: true }).isFloat({ min: -90, max: 90 }).withMessage('Invalid latitude'),
+    body('location.lng').optional({ nullable: true }).isFloat({ min: -180, max: 180 }).withMessage('Invalid longitude'),
+    body('location.radiusMeters').optional({ nullable: true }).isInt({ min: 10, max: 1000 }).withMessage('Radius must be between 10 and 1000 meters'),
   ],
   async (req, res, next) => {
     const errors = validationResult(req)
@@ -49,6 +52,7 @@ router.patch('/settings',
     try {
       const ALLOWED_TOP = ['name', 'phone', 'address', 'city', 'state']
       const ALLOWED_SETTINGS = ['currency', 'timezone', 'brandColor', 'emailFrom', 'replyTo']
+      const ALLOWED_LOCATION = ['lat', 'lng', 'radiusMeters']
 
       const updates = {}
       ALLOWED_TOP.forEach((k) => { if (req.body[k] !== undefined) updates[k] = req.body[k] })
@@ -57,6 +61,14 @@ router.patch('/settings',
         ALLOWED_SETTINGS.forEach((k) => {
           if (req.body.settings[k] !== undefined) {
             updates[`settings.${k}`] = req.body.settings[k]
+          }
+        })
+      }
+
+      if (req.body.location) {
+        ALLOWED_LOCATION.forEach((k) => {
+          if (req.body.location[k] !== undefined) {
+            updates[`location.${k}`] = req.body.location[k]
           }
         })
       }

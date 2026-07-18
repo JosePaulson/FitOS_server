@@ -22,6 +22,16 @@ const gymSchema = new Schema(
     state:   { type: String },
     logo:    { type: String },
 
+    // Gym's physical location, set by dragging a pin on a map in the admin
+    // dashboard. Used to geofence member self check-in — a member can only
+    // mark their own attendance from the member portal when their device is
+    // within `radiusMeters` of this point.
+    location: {
+      lat:          { type: Number },
+      lng:          { type: Number },
+      radiusMeters: { type: Number, default: 50 },
+    },
+
     /**
      * Atomic invoice sequence counter.
      * Incremented via findOneAndUpdate($inc) — never read-then-write.

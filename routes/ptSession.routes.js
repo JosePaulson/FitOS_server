@@ -4,6 +4,7 @@ import PTSession from '../models/PTSession.js'
 import Member from '../models/Member.js'
 import { protect, authorize } from '../middleware/auth.js'
 import { sendPushToMember } from '../services/pushNotification.service.js'
+import { syncMemberPTPlans } from '../services/ptPlanSync.service.js'
 import { estimateCaloriesBurned } from '../utils/calories.js'
 
 const router = Router()
@@ -27,7 +28,7 @@ function validate(req, res) {
  * calorie tracking is a bonus, not something that should block a save.
  */
 async function resolveCalories({ gymId, memberId, excludeId, bodyWeight, durationMinutes, exercises }) {
-  if (exercises?.length === 0 || !durationMinutes) return null
+  if (exercises.length === 0 || !durationMinutes) return null
   let weightKg = Number(bodyWeight) || null
   if (!weightKg) {
     const last = await PTSession.findOne({
@@ -157,6 +158,8 @@ router.post('/',
         WORKOUT_POPULATE,
       ])
 
+      syncMemberPTPlans(req.gymId, memberId).catch((e) => console.error('[pt-plan-sync] create failed:', e.message))
+
       res.status(201).json(populated)
     } catch (err) { next(err) }
   }
@@ -197,6 +200,11 @@ router.patch('/:id',
         .populate(WORKOUT_POPULATE)
 
       if (!session) return res.status(404).json({ message: 'Session not found or access denied' })
+
+      if (updates.status !== undefined || updates.date !== undefined) {
+        syncMemberPTPlans(req.gymId, session.memberId?._id || session.memberId)
+          .catch((e) => console.error('[pt-plan-sync] update failed:', e.message))
+      }
 
       // Notify the member — fire-and-forget, never blocks the response
       const sessionDate = new Date(session.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
@@ -316,6 +324,9 @@ router.delete('/:id', protect, authorize('owner', 'manager', 'trainer'), async (
     if (req.user.role === 'trainer') filter.trainerId = req.user._id
     const session = await PTSession.findOneAndDelete(filter)
     if (!session) return res.status(404).json({ message: 'Session not found or access denied' })
+    if (session.status === 'completed') {
+      syncMemberPTPlans(req.gymId, session.memberId).catch((e) => console.error('[pt-plan-sync] delete failed:', e.message))
+    }
     res.json({ message: 'Session deleted' })
   } catch (err) { next(err) }
 })

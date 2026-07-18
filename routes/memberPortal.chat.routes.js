@@ -164,7 +164,7 @@ router.post('/', async (req, res, next) => {
         return res.status(503).json({ message: 'AI service not configured. Set GEMINI_API_KEY in server/.env' })
       }
 
-      const model    = process.env.GEMINI_MODEL || 'gemini-1.5-flash'
+      const model    = process.env.GEMINI_MODEL || 'gemini-3.5-flash'
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`
 
       // Gemini uses a different message format

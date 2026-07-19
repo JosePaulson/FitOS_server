@@ -1,9 +1,15 @@
 import { Schema, model } from 'mongoose'
 
-const dayHoursSchema = new Schema({
-  isOff: { type: Boolean, default: false },
+const shiftSchema = new Schema({
   start: { type: String, default: '06:00' }, // "HH:mm", 24h, IST wall-clock time
   end:   { type: String, default: '20:00' },
+}, { _id: false })
+
+const dayHoursSchema = new Schema({
+  isOff: { type: Boolean, default: false },
+  // A day can have more than one shift, e.g. a morning slot and an evening
+  // slot with a break in between — common for gyms with split trainer hours.
+  shifts: { type: [shiftSchema], default: () => [{ start: '06:00', end: '20:00' }] },
 }, { _id: false })
 
 /**

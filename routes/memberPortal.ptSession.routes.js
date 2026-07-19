@@ -35,6 +35,16 @@ router.get('/trainers', async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
+// Normalizes a day's working hours to an array of {start, end} shifts,
+// tolerating older TrainerAvailability docs saved before multi-shift
+// support (which had a single start/end instead of a shifts array).
+function getShifts(dayHours) {
+  if (!dayHours) return []
+  if (Array.isArray(dayHours.shifts) && dayHours.shifts.length > 0) return dayHours.shifts
+  if (dayHours.start && dayHours.end) return [{ start: dayHours.start, end: dayHours.end }]
+  return []
+}
+
 // ── GET /api/member-portal/pt-sessions/available-slots ──────────────────────
 // Bookable time slots for a trainer on a given IST calendar day — factors in
 // their weekly working hours, any time-off covering that day, and existing
@@ -54,6 +64,10 @@ router.get('/available-slots', async (req, res, next) => {
 
     if (!dayHours || dayHours.isOff) {
       return res.json({ available: false, reason: "Trainer isn't working this day", slots: [] })
+    }
+    const shifts = getShifts(dayHours)
+    if (shifts.length === 0) {
+      return res.json({ available: false, reason: "Trainer's hours aren't set up for this day", slots: [] })
     }
 
     const dayStart = istStartOfDay(istDateTime(date, '00:00'))
@@ -75,26 +89,30 @@ router.get('/available-slots', async (req, res, next) => {
     }).select('date durationMinutes')
 
     const slotMin = availability.slotDurationMinutes || 60
-    const [sh, sm] = dayHours.start.split(':').map(Number)
-    const [eh, em] = dayHours.end.split(':').map(Number)
-    const endMin = eh * 60 + em
     const now = new Date()
 
     const slots = []
-    for (let cursor = sh * 60 + sm; cursor + slotMin <= endMin; cursor += slotMin) {
-      const slotTime = `${String(Math.floor(cursor / 60)).padStart(2, '0')}:${String(cursor % 60).padStart(2, '0')}`
-      const slotStart = istDateTime(date, slotTime)
-      const slotEndMs = slotStart.getTime() + slotMin * 60000
+    for (const shift of shifts) {
+      const [sh, sm] = shift.start.split(':').map(Number)
+      const [eh, em] = shift.end.split(':').map(Number)
+      const endMin = eh * 60 + em
 
-      if (slotStart < now) continue // don't offer past slots for today
+      for (let cursor = sh * 60 + sm; cursor + slotMin <= endMin; cursor += slotMin) {
+        const slotTime = `${String(Math.floor(cursor / 60)).padStart(2, '0')}:${String(cursor % 60).padStart(2, '0')}`
+        const slotStart = istDateTime(date, slotTime)
+        const slotEndMs = slotStart.getTime() + slotMin * 60000
 
-      const conflict = existing.some((s) => {
-        const bStart = new Date(s.date).getTime()
-        const bEnd = bStart + (s.durationMinutes || 60) * 60000
-        return bStart < slotEndMs && slotStart.getTime() < bEnd
-      })
-      if (!conflict) slots.push(slotTime)
+        if (slotStart < now) continue // don't offer past slots for today
+
+        const conflict = existing.some((s) => {
+          const bStart = new Date(s.date).getTime()
+          const bEnd = bStart + (s.durationMinutes || 60) * 60000
+          return bStart < slotEndMs && slotStart.getTime() < bEnd
+        })
+        if (!conflict) slots.push(slotTime)
+      }
     }
+    slots.sort()
 
     res.json({ available: slots.length > 0, slots })
   } catch (err) { next(err) }
@@ -137,8 +155,13 @@ router.post('/request',
         }
         if (dayHours && !dayHours.isOff) {
           const requestedTime = istTimeOfDay(when)
-          if (requestedTime < dayHours.start || requestedTime >= dayHours.end) {
-            return res.status(400).json({ message: `${trainer.name}'s working hours that day are ${dayHours.start}–${dayHours.end}` })
+          const shifts = getShifts(dayHours)
+          const withinAnyShift = shifts.some((s) => requestedTime >= s.start && requestedTime < s.end)
+          if (!withinAnyShift) {
+            const shiftsText = shifts.length > 0
+              ? shifts.map((s) => `${s.start}–${s.end}`).join(', ')
+              : 'not set up'
+            return res.status(400).json({ message: `${trainer.name}'s working hours that day are ${shiftsText}` })
           }
         }
 

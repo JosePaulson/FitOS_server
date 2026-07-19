@@ -48,6 +48,12 @@ await connectDB()
 
 const app = express()
 
+// A fresh value every time the process boots — the simplest reliable signal
+// that "the server was redeployed", without needing a manual version bump.
+// The frontends poll GET /api/version and prompt to reload if this changes
+// since the page was loaded, covering server-side code updates.
+const SERVER_BOOT_VERSION = String(Date.now())
+
 // ── Security & logging ────────────────────────────────────────────────────
 app.use(helmet())
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'))
@@ -117,6 +123,12 @@ app.use('/api/workout-library', workoutLibraryRoutes)
 // ── Health check ──────────────────────────────────────────────────────────
 // Deliberately mounted before rate limiting, auth, and DB-dependent logic —
 // this must always respond fast, even if the database is briefly down.
+// Polled by both frontends to detect a server redeploy and prompt a reload.
+// No auth required — needs to work even for a logged-out/expired session.
+app.get('/api/version', (_req, res) => {
+  res.json({ version: SERVER_BOOT_VERSION })
+})
+
 // Used by uptime pingers (see deployment notes) to keep a Render free-tier
 // instance from spinning down after 15 minutes of inactivity.
 app.get('/health', (_req, res) => {

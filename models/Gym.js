@@ -32,6 +32,19 @@ const gymSchema = new Schema(
       radiusMeters: { type: Number, default: 50 },
     },
 
+    // Operating hours, shown to members. Simple per-day text rather than a
+    // strict schema — gyms often just want to say "6 AM – 10 PM" or
+    // "Closed" without modeling exact time slots.
+    openingHours: {
+      monday:    { type: String, default: '' },
+      tuesday:   { type: String, default: '' },
+      wednesday: { type: String, default: '' },
+      thursday:  { type: String, default: '' },
+      friday:    { type: String, default: '' },
+      saturday:  { type: String, default: '' },
+      sunday:    { type: String, default: '' },
+    },
+
     /**
      * Atomic invoice sequence counter.
      * Incremented via findOneAndUpdate($inc) — never read-then-write.

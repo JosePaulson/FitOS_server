@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { memberProtect } from '../middleware/memberAuth.js'
 import Gym from '../models/Gym.js'
 import Attendance from '../models/Attendance.js'
+import { istStartOfDay } from '../utils/dateIST.js'
 
 const router = Router()
 router.use(memberProtect)
@@ -18,10 +19,10 @@ function distanceMeters(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
+// "Today" is an IST calendar day throughout this app — not the server's own
+// system timezone, which is typically UTC in production.
 function startOfToday() {
-  const d = new Date()
-  d.setHours(0, 0, 0, 0)
-  return d
+  return istStartOfDay(new Date())
 }
 
 /**

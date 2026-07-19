@@ -19,6 +19,7 @@ import memberRoutes from './routes/member.routes.js'
 import planRoutes from './routes/plan.routes.js'
 import ptPlanRoutes from './routes/ptPlan.routes.js'
 import memberPTPlanRoutes from './routes/memberPTPlan.routes.js'
+import trainerAvailabilityRoutes from './routes/trainerAvailability.routes.js'
 import invoiceRoutes from './routes/invoice.routes.js'
 import attendanceRoutes from './routes/attendance.routes.js'
 import dashboardRoutes from './routes/dashboard.routes.js'
@@ -89,6 +90,7 @@ app.use('/api/members', memberRoutes)
 app.use('/api/plans', planRoutes)
 app.use('/api/pt-plans', ptPlanRoutes)
 app.use('/api/member-pt-plans', memberPTPlanRoutes)
+app.use('/api/trainer-availability', trainerAvailabilityRoutes)
 app.use('/api/invoices', invoiceRoutes)
 app.use('/api/attendance', attendanceRoutes)
 app.use('/api/dashboard', dashboardRoutes)

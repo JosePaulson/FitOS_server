@@ -53,6 +53,7 @@ router.patch('/settings',
       const ALLOWED_TOP = ['name', 'phone', 'address', 'city', 'state']
       const ALLOWED_SETTINGS = ['currency', 'timezone', 'brandColor', 'emailFrom', 'replyTo']
       const ALLOWED_LOCATION = ['lat', 'lng', 'radiusMeters']
+      const ALLOWED_DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
 
       const updates = {}
       ALLOWED_TOP.forEach((k) => { if (req.body[k] !== undefined) updates[k] = req.body[k] })
@@ -69,6 +70,14 @@ router.patch('/settings',
         ALLOWED_LOCATION.forEach((k) => {
           if (req.body.location[k] !== undefined) {
             updates[`location.${k}`] = req.body.location[k]
+          }
+        })
+      }
+
+      if (req.body.openingHours) {
+        ALLOWED_DAYS.forEach((day) => {
+          if (req.body.openingHours[day] !== undefined) {
+            updates[`openingHours.${day}`] = String(req.body.openingHours[day]).slice(0, 60)
           }
         })
       }

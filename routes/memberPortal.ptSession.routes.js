@@ -3,6 +3,9 @@ import { body, validationResult } from 'express-validator'
 import { memberProtect } from '../middleware/memberAuth.js'
 import PTSession from '../models/PTSession.js'
 import User from '../models/User.js'
+import TrainerAvailability from '../models/TrainerAvailability.js'
+import TrainerTimeOff from '../models/TrainerTimeOff.js'
+import { istDayName, istDateKey, istTimeOfDay, istDateTime, istStartOfDay } from '../utils/dateIST.js'
 
 const router = Router()
 router.use(memberProtect)
@@ -32,6 +35,71 @@ router.get('/trainers', async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
+// ── GET /api/member-portal/pt-sessions/available-slots ──────────────────────
+// Bookable time slots for a trainer on a given IST calendar day — factors in
+// their weekly working hours, any time-off covering that day, and existing
+// pending/scheduled bookings (so members can never double-book a trainer).
+// MUST be before /:id.
+router.get('/available-slots', async (req, res, next) => {
+  try {
+    const { trainerId, date } = req.query // date = "YYYY-MM-DD", an IST calendar day
+    if (!trainerId || !date) return res.status(400).json({ message: 'trainerId and date are required' })
+
+    const trainer = await User.findOne({ _id: trainerId, gymId: req.gymId, isActive: true })
+    if (!trainer) return res.status(404).json({ message: 'Trainer not found' })
+
+    const dayName = istDayName(istDateTime(date, '12:00')) // noon sidesteps any day-boundary edge cases
+    const availability = await TrainerAvailability.findOne({ gymId: req.gymId, trainerId })
+    const dayHours = availability?.weeklyHours?.[dayName]
+
+    if (!dayHours || dayHours.isOff) {
+      return res.json({ available: false, reason: "Trainer isn't working this day", slots: [] })
+    }
+
+    const dayStart = istStartOfDay(istDateTime(date, '00:00'))
+    const timeOff = await TrainerTimeOff.findOne({
+      gymId: req.gymId, trainerId,
+      startDate: { $lte: dayStart }, endDate: { $gte: dayStart },
+    })
+    if (timeOff) {
+      return res.json({ available: false, reason: timeOff.reason || 'Trainer is unavailable this day', slots: [] })
+    }
+
+    // Existing bookings that day — pending or confirmed both block the slot;
+    // declined/cancelled/completed don't.
+    const dayEnd = istDateTime(date, '23:59')
+    const existing = await PTSession.find({
+      gymId: req.gymId, trainerId,
+      date: { $gte: dayStart, $lte: dayEnd },
+      status: { $in: ['pending', 'scheduled'] },
+    }).select('date durationMinutes')
+
+    const slotMin = availability.slotDurationMinutes || 60
+    const [sh, sm] = dayHours.start.split(':').map(Number)
+    const [eh, em] = dayHours.end.split(':').map(Number)
+    const endMin = eh * 60 + em
+    const now = new Date()
+
+    const slots = []
+    for (let cursor = sh * 60 + sm; cursor + slotMin <= endMin; cursor += slotMin) {
+      const slotTime = `${String(Math.floor(cursor / 60)).padStart(2, '0')}:${String(cursor % 60).padStart(2, '0')}`
+      const slotStart = istDateTime(date, slotTime)
+      const slotEndMs = slotStart.getTime() + slotMin * 60000
+
+      if (slotStart < now) continue // don't offer past slots for today
+
+      const conflict = existing.some((s) => {
+        const bStart = new Date(s.date).getTime()
+        const bEnd = bStart + (s.durationMinutes || 60) * 60000
+        return bStart < slotEndMs && slotStart.getTime() < bEnd
+      })
+      if (!conflict) slots.push(slotTime)
+    }
+
+    res.json({ available: slots.length > 0, slots })
+  } catch (err) { next(err) }
+})
+
 // ── POST /api/member-portal/pt-sessions/request ─────────────────────────────
 // A member books a PT session slot off the calendar. Lands as 'pending'
 // until a trainer (or manager/owner) confirms it from the admin dashboard.
@@ -56,6 +124,48 @@ router.post('/request',
       if (trainerId) {
         const trainer = await User.findOne({ _id: trainerId, gymId: req.gymId, isActive: true })
         if (!trainer) return res.status(404).json({ message: 'Trainer not found' })
+
+        // Re-validate against working hours, time-off, and existing bookings
+        // server-side — the available-slots endpoint is advisory for the UI,
+        // this is the actual gate.
+        const dateKey = istDateKey(when)
+        const dayName = istDayName(when)
+        const availability = await TrainerAvailability.findOne({ gymId: req.gymId, trainerId })
+        const dayHours = availability?.weeklyHours?.[dayName]
+        if (dayHours && dayHours.isOff) {
+          return res.status(400).json({ message: `${trainer.name} isn't working that day` })
+        }
+        if (dayHours && !dayHours.isOff) {
+          const requestedTime = istTimeOfDay(when)
+          if (requestedTime < dayHours.start || requestedTime >= dayHours.end) {
+            return res.status(400).json({ message: `${trainer.name}'s working hours that day are ${dayHours.start}–${dayHours.end}` })
+          }
+        }
+
+        const dayStart = istStartOfDay(when)
+        const timeOff = await TrainerTimeOff.findOne({
+          gymId: req.gymId, trainerId,
+          startDate: { $lte: dayStart }, endDate: { $gte: dayStart },
+        })
+        if (timeOff) {
+          return res.status(400).json({ message: `${trainer.name} is unavailable that day${timeOff.reason ? ` (${timeOff.reason})` : ''}` })
+        }
+
+        const durMin = durationMinutes || 60
+        const newEndMs = when.getTime() + durMin * 60000
+        const sameDaySessions = await PTSession.find({
+          gymId: req.gymId, trainerId,
+          status: { $in: ['pending', 'scheduled'] },
+          date: { $gte: dayStart, $lt: new Date(dayStart.getTime() + 86400000) },
+        }).select('date durationMinutes')
+        const overlapping = sameDaySessions.some((s) => {
+          const exStart = new Date(s.date).getTime()
+          const exEnd = exStart + (s.durationMinutes || 60) * 60000
+          return exStart < newEndMs && when.getTime() < exEnd
+        })
+        if (overlapping) {
+          return res.status(409).json({ message: `${trainer.name} already has a booking at that time — pick another slot` })
+        }
       }
 
       const session = await PTSession.create({

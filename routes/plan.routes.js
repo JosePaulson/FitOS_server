@@ -21,16 +21,19 @@ router.get('/', protect, async (req, res, next) => {
 router.post('/', protect, authorize('owner', 'manager'),
   [
     body('name').notEmpty().withMessage('Plan name required'),
-    body('durationDays').isInt({ min: 1 }).withMessage('Duration in days required'),
+    body('durationType').optional().isIn(['days', 'months']).withMessage('Duration type must be days or months'),
+    body('durationValue').isInt({ min: 1 }).withMessage('Duration value required'),
     body('price').isFloat({ min: 0 }).withMessage('Price required'),
   ],
   async (req, res, next) => {
     if (!validate(req, res)) return
     try {
-      const { name, description, durationDays, price, sessionsIncluded } = req.body
+      const { name, description, durationType, durationValue, price, sessionsIncluded } = req.body
       const plan = await MembershipPlan.create({
         gymId: req.gymId, name, description,
-        durationDays: Number(durationDays), price: Number(price),
+        durationType: durationType === 'months' ? 'months' : 'days',
+        durationValue: Number(durationValue),
+        price: Number(price),
         sessionsIncluded: Number(sessionsIncluded) || 0,
       })
       res.status(201).json(plan)
@@ -40,11 +43,13 @@ router.post('/', protect, authorize('owner', 'manager'),
 
 router.patch('/:id', protect, authorize('owner', 'manager'), async (req, res, next) => {
   try {
-    const allowed = ['name','description','durationDays','price','sessionsIncluded','isActive']
+    const allowed = ['name','description','durationType','durationValue','price','sessionsIncluded','isActive']
     const updates = {}
     allowed.forEach((k) => { if (req.body[k] !== undefined) updates[k] = req.body[k] })
-    const plan = await MembershipPlan.findOneAndUpdate({ _id: req.params.id, gymId: req.gymId }, updates, { new: true, runValidators: true })
+    const plan = await MembershipPlan.findOne({ _id: req.params.id, gymId: req.gymId })
     if (!plan) return res.status(404).json({ message: 'Plan not found' })
+    Object.assign(plan, updates)
+    await plan.save() // triggers pre('validate') so durationDays stays in sync
     res.json(plan)
   } catch (err) { next(err) }
 })

@@ -63,7 +63,7 @@ app.use('/api/webhooks/razorpay', webhookRoutes)
 
 // ── CORS ──────────────────────────────────────────────────────────────────
 app.use(cors({
-  origin: [process.env.CLIENT_URL, process.env.MEMBER_PORTAL_URL, process.env.MEMBER_PORTAL_URL_VERCEL, process.env.CLIENT_URL_VERCEL, 'http://localhost:5173', 'http://192.168.0.112:8081', 'http://192.168.0.112:5174', 'http://localhost:8081', 'http://192.168.0.105:8081'],
+  origin: [process.env.CLIENT_URL, process.env.MEMBER_PORTAL_URL, process.env.MEMBER_PORTAL_URL_VERCEL, process.env.CLIENT_URL_VERCEL, 'http://localhost:5173', 'http://192.168.0.112:8081', 'http://192.168.0.112:5174', 'http://localhost:8081', 'http://192.168.0.105:8081', 'exp://192.168.0.105:8081'],
   credentials: true,
 }))
 

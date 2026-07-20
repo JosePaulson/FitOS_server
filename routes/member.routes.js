@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { body, validationResult } from 'express-validator'
 import Member from '../models/Member.js'
-import MembershipPlan from '../models/MembershipPlan.js'
+import MembershipPlan, { addPlanDuration } from '../models/MembershipPlan.js'
 import Invoice from '../models/Invoice.js'
 import { protect, authorize } from '../middleware/auth.js'
 import { extractTax } from '../utils/tax.js'
@@ -104,7 +104,7 @@ router.get('/', protect, async (req, res, next) => {
         .sort({ createdAt: -1 })
         .skip((page - 1) * limit)
         .limit(Number(limit))
-        .populate('currentPlanId', 'name price taxRate taxInclusive durationDays')
+        .populate('currentPlanId', 'name price taxRate taxInclusive durationDays durationType durationValue')
         .populate('assignedTrainerId', 'name'),
       Member.countDocuments(filter),
     ])
@@ -134,13 +134,15 @@ router.post('/',
   async (req, res, next) => {
     if (!validate(req, res)) return
     try {
-      const { name, phone, email, dob, age, gender, height, planId, assignedTrainerId, source, emergencyContact, healthNotes } = req.body
+      const { name, phone, email, dob, age, gender, height, planId, assignedTrainerId, source, emergencyContact, healthNotes, startDate: startDateInput, expiryDate: expiryDateInput } = req.body
       const plan = await MembershipPlan.findOne({ _id: planId, gymId: req.gymId })
       if (!plan) return res.status(404).json({ message: 'Plan not found' })
 
-      const startDate = new Date()
-      const expiryDate = new Date(startDate)
-      expiryDate.setDate(expiryDate.getDate() + plan.durationDays)
+      // Admins can back-date or future-date the membership start — defaults
+      // to today if not provided. Expiry is derived from the plan's
+      // validity (days or calendar months) unless explicitly overridden.
+      const startDate = startDateInput ? new Date(startDateInput) : new Date()
+      const expiryDate = expiryDateInput ? new Date(expiryDateInput) : addPlanDuration(startDate, plan)
 
       const member = await Member.create({
         gymId: req.gymId, name, phone, email, dob, age, gender, height,
@@ -162,15 +164,33 @@ router.post('/',
 // PATCH /api/members/:id
 router.patch('/:id', protect, authorize('owner', 'manager'), async (req, res, next) => {
   try {
-    const allowed = ['name', 'phone', 'email', 'dob', 'age', 'gender', 'height', 'photo', 'emergencyContact', 'healthNotes', 'assignedTrainerId', 'membershipStatus', 'source']
+    const allowed = [
+      'name', 'phone', 'email', 'dob', 'age', 'gender', 'height', 'photo',
+      'emergencyContact', 'healthNotes', 'assignedTrainerId', 'membershipStatus', 'source',
+      // membership plan + validity can be edited directly, independent of the renew flow —
+      // any date (past or future) is accepted for start/expiry.
+      'currentPlanId', 'membershipStartDate', 'membershipExpiryDate',
+    ]
     const updates = {}
     allowed.forEach((k) => { if (req.body[k] !== undefined) updates[k] = req.body[k] })
+
+    // If the plan is being changed but no explicit expiry was given,
+    // recompute the expiry from the (possibly also-updated) start date
+    // using the new plan's validity period.
+    if (updates.currentPlanId && updates.membershipExpiryDate === undefined) {
+      const plan = await MembershipPlan.findOne({ _id: updates.currentPlanId, gymId: req.gymId })
+      if (!plan) return res.status(404).json({ message: 'Plan not found' })
+      const existing = await Member.findOne({ _id: req.params.id, gymId: req.gymId })
+      if (!existing) return res.status(404).json({ message: 'Member not found' })
+      const start = updates.membershipStartDate ? new Date(updates.membershipStartDate) : (existing.membershipStartDate || new Date())
+      updates.membershipExpiryDate = addPlanDuration(start, plan)
+    }
 
     const member = await Member.findOneAndUpdate(
       { _id: req.params.id, gymId: req.gymId },
       updates,
       { new: true, runValidators: true }
-    )
+    ).populate('currentPlanId', 'name price taxRate taxInclusive durationDays durationType durationValue')
     if (!member) return res.status(404).json({ message: 'Member not found' })
     res.json(member)
   } catch (err) { next(err) }
@@ -179,21 +199,27 @@ router.patch('/:id', protect, authorize('owner', 'manager'), async (req, res, ne
 // POST /api/members/:id/renew
 router.post('/:id/renew', protect, authorize('owner', 'manager', 'receptionist'), async (req, res, next) => {
   try {
-    const { planId } = req.body
+    const { planId, startDate: startDateInput, expiryDate: expiryDateInput } = req.body
     const member = await Member.findOne({ _id: req.params.id, gymId: req.gymId })
     if (!member) return res.status(404).json({ message: 'Member not found' })
 
     const plan = await MembershipPlan.findOne({ _id: planId || member.currentPlanId, gymId: req.gymId })
     if (!plan) return res.status(404).json({ message: 'Plan not found' })
 
-    const base = (member.membershipStatus === 'active' && member.membershipExpiryDate > new Date())
-      ? new Date(member.membershipExpiryDate)
-      : new Date()
-    base.setDate(base.getDate() + plan.durationDays)
+    // Anchor date for the new validity period:
+    // 1. explicit startDate from the admin (any date — past or future), else
+    // 2. the member's current expiry, if their membership is still active, else
+    // 3. today.
+    const base = startDateInput
+      ? new Date(startDateInput)
+      : (member.membershipStatus === 'active' && member.membershipExpiryDate > new Date())
+        ? new Date(member.membershipExpiryDate)
+        : new Date()
 
+    member.membershipStartDate = startDateInput ? new Date(startDateInput) : member.membershipStartDate
     member.currentPlanId = plan._id
     member.membershipStatus = 'active'
-    member.membershipExpiryDate = base
+    member.membershipExpiryDate = expiryDateInput ? new Date(expiryDateInput) : addPlanDuration(base, plan)
     await member.save()
 
     const invoice = await Invoice.create(buildInvoicePayload(req.gymId, member._id, plan))

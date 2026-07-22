@@ -7,6 +7,13 @@ const invoiceSchema = new Schema(
     memberId: { type: Schema.Types.ObjectId, ref: 'Member', required: true, index: true },
     planId:   { type: Schema.Types.ObjectId, ref: 'MembershipPlan' },
 
+    // What this invoice is for. 'membership' covers enrolment/renewal
+    // (the original/only case); 'pt' is a personal-training package
+    // purchase, billed independently of any membership plan.
+    type:       { type: String, enum: ['membership', 'pt'], default: 'membership', index: true },
+    ptPlanId:   { type: Schema.Types.ObjectId, ref: 'PTPlan' },        // catalog template, when type === 'pt'
+    memberPTPlanId: { type: Schema.Types.ObjectId, ref: 'MemberPTPlan' }, // the assignment created once this invoice is paid
+
     /**
      * Invoice number format: <SUBDOMAIN>-<SEQ>
      * e.g.  IRONZONE-00001  FLEXFIT-00003
@@ -31,11 +38,21 @@ const invoiceSchema = new Schema(
 
     paymentMethod: {
       type: String,
-      enum: ['cash', 'upi', 'card', 'netbanking', 'online', 'other'],
+      enum: ['cash', 'upi', 'card', 'netbanking', 'wallet', 'emi', 'paylater', 'online', 'other'],
     },
 
     razorpayOrderId:   { type: String },
     razorpayPaymentId: { type: String },
+    razorpaySignature: { type: String },
+
+    // Whether the real-world effect of this invoice (extending the
+    // member's plan / activating a PT plan assignment) has already been
+    // applied. Invoices created by staff (enrol/renew) apply immediately
+    // and default this to true — payment there is just bookkeeping.
+    // Invoices created by a member's own online checkout default this to
+    // false at creation and flip to true only once payment is confirmed,
+    // so an abandoned checkout never grants membership/PT time for free.
+    fulfilled: { type: Boolean, default: true },
 
     paidAt:  { type: Date },
     dueDate: { type: Date },

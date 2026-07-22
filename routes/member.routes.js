@@ -1,13 +1,14 @@
 import { Router } from 'express'
 import { body, validationResult } from 'express-validator'
 import Member from '../models/Member.js'
-import MembershipPlan, { addPlanDuration } from '../models/MembershipPlan.js'
+import MembershipPlan from '../models/MembershipPlan.js'
 import Invoice from '../models/Invoice.js'
 import { protect, authorize } from '../middleware/auth.js'
 import { extractTax } from '../utils/tax.js'
 import { sendWelcomeEmail, sendInvoiceEmail } from '../services/email.service.js'
 import { resolveGymSender } from '../utils/gymEmailSender.js'
 import { sendPushToMember } from '../services/pushNotification.service.js'
+import { addPlanDuration } from '../utils/planDuration.js'
 
 const router = Router()
 
@@ -18,7 +19,7 @@ function validate(req, res) {
 }
 
 /** Build invoice payload — tax extracted from inclusive price */
-function buildInvoicePayload(gymId, memberId, plan) {
+function buildInvoicePayload(gymId, memberId, plan, invoiceDate) {
   const { baseAmount, taxAmount, totalAmount } = extractTax(plan.price, plan.taxRate ?? 18)
   return {
     gymId, memberId,
@@ -28,7 +29,12 @@ function buildInvoicePayload(gymId, memberId, plan) {
     taxAmount,
     totalAmount,
     status: 'pending',
-    dueDate: new Date(),
+    dueDate: invoiceDate || new Date(),
+    // Mongoose's `timestamps` option only auto-sets createdAt when it's
+    // not already present on the doc — passing it here lets a backdated
+    // (or future-dated) enrolment show that same date as the invoice date,
+    // instead of always showing "today".
+    ...(invoiceDate ? { createdAt: invoiceDate } : {}),
   }
 }
 
@@ -104,7 +110,7 @@ router.get('/', protect, async (req, res, next) => {
         .sort({ createdAt: -1 })
         .skip((page - 1) * limit)
         .limit(Number(limit))
-        .populate('currentPlanId', 'name price taxRate taxInclusive durationDays durationType durationValue')
+        .populate('currentPlanId', 'name price taxRate taxInclusive durationDays durationUnit durationValue')
         .populate('assignedTrainerId', 'name'),
       Member.countDocuments(filter),
     ])
@@ -116,7 +122,7 @@ router.get('/', protect, async (req, res, next) => {
 router.get('/:id', protect, async (req, res, next) => {
   try {
     const member = await Member.findOne({ _id: req.params.id, gymId: req.gymId })
-      .populate('currentPlanId assignedTrainerId', 'name price taxRate taxInclusive')
+      .populate('currentPlanId assignedTrainerId', 'name price taxRate taxInclusive durationDays durationUnit durationValue')
     if (!member) return res.status(404).json({ message: 'Member not found' })
     res.json(member)
   } catch (err) { next(err) }
@@ -134,15 +140,14 @@ router.post('/',
   async (req, res, next) => {
     if (!validate(req, res)) return
     try {
-      const { name, phone, email, dob, age, gender, height, planId, assignedTrainerId, source, emergencyContact, healthNotes, startDate: startDateInput, expiryDate: expiryDateInput } = req.body
+      const { name, phone, email, dob, age, gender, height, planId, assignedTrainerId, source, emergencyContact, healthNotes, membershipStartDate } = req.body
       const plan = await MembershipPlan.findOne({ _id: planId, gymId: req.gymId })
       if (!plan) return res.status(404).json({ message: 'Plan not found' })
 
-      // Admins can back-date or future-date the membership start — defaults
-      // to today if not provided. Expiry is derived from the plan's
-      // validity (days or calendar months) unless explicitly overridden.
-      const startDate = startDateInput ? new Date(startDateInput) : new Date()
-      const expiryDate = expiryDateInput ? new Date(expiryDateInput) : addPlanDuration(startDate, plan)
+      // Admin can back-date or future-date the membership start — defaults
+      // to today when not provided.
+      const startDate = membershipStartDate ? new Date(membershipStartDate) : new Date()
+      const expiryDate = addPlanDuration(startDate, plan)
 
       const member = await Member.create({
         gymId: req.gymId, name, phone, email, dob, age, gender, height,
@@ -151,10 +156,7 @@ router.post('/',
         assignedTrainerId, source: source || 'walk-in', emergencyContact, healthNotes,
       })
 
-      const invoice = await Invoice.create(buildInvoicePayload(req.gymId, member._id, plan))
-
-      // Fire welcome + invoice emails (non-blocking)
-      fireEnrolmentEmails({ member, invoice, plan, gymId: req.gymId, isRenewal: false })
+      const invoice = await Invoice.create(buildInvoicePayload(req.gymId, member._id, plan, startDate))
 
       res.status(201).json({ member, invoice })
     } catch (err) { next(err) }
@@ -164,33 +166,23 @@ router.post('/',
 // PATCH /api/members/:id
 router.patch('/:id', protect, authorize('owner', 'manager'), async (req, res, next) => {
   try {
-    const allowed = [
-      'name', 'phone', 'email', 'dob', 'age', 'gender', 'height', 'photo',
-      'emergencyContact', 'healthNotes', 'assignedTrainerId', 'membershipStatus', 'source',
-      // membership plan + validity can be edited directly, independent of the renew flow —
-      // any date (past or future) is accepted for start/expiry.
-      'currentPlanId', 'membershipStartDate', 'membershipExpiryDate',
-    ]
+    const allowed = ['name', 'phone', 'email', 'dob', 'age', 'gender', 'height', 'photo', 'emergencyContact', 'healthNotes', 'assignedTrainerId', 'membershipStatus', 'source', 'membershipStartDate', 'membershipExpiryDate', 'currentPlanId']
     const updates = {}
     allowed.forEach((k) => { if (req.body[k] !== undefined) updates[k] = req.body[k] })
 
-    // If the plan is being changed but no explicit expiry was given,
-    // recompute the expiry from the (possibly also-updated) start date
-    // using the new plan's validity period.
-    if (updates.currentPlanId && updates.membershipExpiryDate === undefined) {
+    // Changing the plan here is a direct reassignment (e.g. correcting a
+    // data-entry mistake) — it does NOT recalculate membership dates. Use
+    // the dedicated Renew flow when the intent is to extend validity.
+    if (updates.currentPlanId) {
       const plan = await MembershipPlan.findOne({ _id: updates.currentPlanId, gymId: req.gymId })
       if (!plan) return res.status(404).json({ message: 'Plan not found' })
-      const existing = await Member.findOne({ _id: req.params.id, gymId: req.gymId })
-      if (!existing) return res.status(404).json({ message: 'Member not found' })
-      const start = updates.membershipStartDate ? new Date(updates.membershipStartDate) : (existing.membershipStartDate || new Date())
-      updates.membershipExpiryDate = addPlanDuration(start, plan)
     }
 
     const member = await Member.findOneAndUpdate(
       { _id: req.params.id, gymId: req.gymId },
       updates,
       { new: true, runValidators: true }
-    ).populate('currentPlanId', 'name price taxRate taxInclusive durationDays durationType durationValue')
+    ).populate('currentPlanId assignedTrainerId', 'name price taxRate taxInclusive durationDays durationUnit durationValue')
     if (!member) return res.status(404).json({ message: 'Member not found' })
     res.json(member)
   } catch (err) { next(err) }
@@ -199,27 +191,31 @@ router.patch('/:id', protect, authorize('owner', 'manager'), async (req, res, ne
 // POST /api/members/:id/renew
 router.post('/:id/renew', protect, authorize('owner', 'manager', 'receptionist'), async (req, res, next) => {
   try {
-    const { planId, startDate: startDateInput, expiryDate: expiryDateInput } = req.body
+    const { planId, startDate } = req.body
     const member = await Member.findOne({ _id: req.params.id, gymId: req.gymId })
     if (!member) return res.status(404).json({ message: 'Member not found' })
 
     const plan = await MembershipPlan.findOne({ _id: planId || member.currentPlanId, gymId: req.gymId })
     if (!plan) return res.status(404).json({ message: 'Plan not found' })
 
-    // Anchor date for the new validity period:
-    // 1. explicit startDate from the admin (any date — past or future), else
-    // 2. the member's current expiry, if their membership is still active, else
-    // 3. today.
-    const base = startDateInput
-      ? new Date(startDateInput)
-      : (member.membershipStatus === 'active' && member.membershipExpiryDate > new Date())
+    // If the admin explicitly picked a start date (any date — past or
+    // future), always base the new expiry off that. Otherwise fall back to
+    // the normal "extend from current expiry, or from today if already
+    // lapsed" behaviour.
+    let base
+    if (startDate) {
+      base = new Date(startDate)
+    } else {
+      base = (member.membershipStatus === 'active' && member.membershipExpiryDate > new Date())
         ? new Date(member.membershipExpiryDate)
         : new Date()
+    }
+    const newExpiry = addPlanDuration(base, plan)
 
-    member.membershipStartDate = startDateInput ? new Date(startDateInput) : member.membershipStartDate
     member.currentPlanId = plan._id
     member.membershipStatus = 'active'
-    member.membershipExpiryDate = expiryDateInput ? new Date(expiryDateInput) : addPlanDuration(base, plan)
+    member.membershipStartDate = startDate ? new Date(startDate) : member.membershipStartDate
+    member.membershipExpiryDate = newExpiry
     await member.save()
 
     const invoice = await Invoice.create(buildInvoicePayload(req.gymId, member._id, plan))

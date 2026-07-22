@@ -41,7 +41,12 @@ import memberPortalFoodScanRoutes from './routes/memberPortal.foodScan.routes.js
 import memberPortalPTPlanRoutes from './routes/memberPortal.ptPlan.routes.js'
 import memberPortalAttendanceCheckinRoutes from './routes/memberPortal.attendanceCheckin.routes.js'
 import memberPortalWorkoutLogRoutes from './routes/memberPortal.workoutLog.routes.js'
+import memberPortalPaymentRoutes from './routes/memberPortal.payment.routes.js'
 import webhookRoutes from './routes/webhook.routes.js'
+import complaintRoutes from './routes/complaint.routes.js'
+import memberPortalComplaintRoutes from './routes/memberPortal.complaint.routes.js'
+import staffRatingRoutes from './routes/staffRating.routes.js'
+import memberPortalStaffRatingRoutes from './routes/memberPortal.staffRating.routes.js'
 
 // ── Connect DB ────────────────────────────────────────────────────────────
 await connectDB()
@@ -115,10 +120,15 @@ app.use('/api/member-portal/food-scan', memberPortalFoodScanRoutes)
 app.use('/api/member-portal/pt-plans', memberPortalPTPlanRoutes)
 app.use('/api/member-portal/attendance', memberPortalAttendanceCheckinRoutes)
 app.use('/api/member-portal/workout-logs', memberPortalWorkoutLogRoutes)
+app.use('/api/member-portal/payments', memberPortalPaymentRoutes)
+app.use('/api/member-portal/complaints', memberPortalComplaintRoutes)
+app.use('/api/member-portal/staff-ratings', memberPortalStaffRatingRoutes)
 app.use('/api/member-portal', memberPortalRoutes)
 app.use('/api/pt-sessions', ptSessionRoutes)
 app.use('/api/equipment', equipmentRoutes)
 app.use('/api/workout-library', workoutLibraryRoutes)
+app.use('/api/complaints', complaintRoutes)
+app.use('/api/staff-ratings', staffRatingRoutes)
 
 // ── Health check ──────────────────────────────────────────────────────────
 // Deliberately mounted before rate limiting, auth, and DB-dependent logic —

@@ -1,6 +1,8 @@
 import crypto from 'crypto'
 import Razorpay from 'razorpay'
 import Gym from '../models/Gym.js'
+import Invoice from '../models/Invoice.js'
+import { fulfillInvoicePayment } from './paymentFulfillment.service.js'
 
 let _razorpay
 function getRazorpay() {
@@ -11,6 +13,16 @@ function getRazorpay() {
     })
   }
   return _razorpay
+}
+
+/**
+ * There's a single, platform-level Razorpay account for now (same one used
+ * for gym SaaS subscriptions above) — it also collects member payments for
+ * membership/PT across every gym on FitOS. Routes should check this before
+ * offering online payment, and degrade to "pay at the front desk" if unset.
+ */
+export function isRazorpayConfigured() {
+  return Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET)
 }
 
 export const RAZORPAY_PLAN_IDS = {
@@ -42,6 +54,42 @@ export async function fetchSubscription(subscriptionId) {
   return getRazorpay().subscriptions.fetch(subscriptionId)
 }
 
+/* ── One-time payments (member → gym: membership & PT plan purchases) ──────
+ * Separate from the subscriptions API above, which is gym → FitOS SaaS
+ * billing. Both currently run through the same Razorpay account. */
+
+/**
+ * Creates a Razorpay Order for a single invoice payment.
+ * `amount` is in rupees (as stored on Invoice.totalAmount) — converted to
+ * paise here, since that's the unit Razorpay's API expects.
+ */
+export async function createOrder({ amount, currency = 'INR', receipt, notes = {} }) {
+  return getRazorpay().orders.create({
+    amount: Math.round(amount * 100),
+    currency,
+    receipt,
+    notes,
+    payment_capture: 1, // auto-capture — no separate manual capture step
+  })
+}
+
+export async function fetchPayment(paymentId) {
+  return getRazorpay().payments.fetch(paymentId)
+}
+
+/**
+ * Verifies the signature Razorpay Checkout returns to the client on
+ * success. Per Razorpay's docs: HMAC-SHA256 of "order_id|payment_id",
+ * signed with the key secret, must match razorpay_signature.
+ */
+export function verifyPaymentSignature({ orderId, paymentId, signature }) {
+  const expected = crypto
+    .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+    .update(`${orderId}|${paymentId}`)
+    .digest('hex')
+  return expected === signature
+}
+
 export function verifyWebhookSignature(rawBody, signature) {
   const expected = crypto
     .createHmac('sha256', process.env.RAZORPAY_WEBHOOK_SECRET)
@@ -50,7 +98,46 @@ export function verifyWebhookSignature(rawBody, signature) {
   return expected === signature
 }
 
+/**
+ * Safety net for one-time invoice payments (membership/PT bought from the
+ * member portal): the client already confirms payment via POST
+ * /member-portal/payments/verify right after Checkout succeeds, but if the
+ * member closes the tab before that call lands, this webhook still fulfils
+ * the invoice. fulfillInvoicePayment() is idempotent, so it's harmless if
+ * both paths fire for the same payment.
+ *
+ * Looked up by razorpay_order_id (which we set on the Invoice ourselves at
+ * order-creation time) rather than payment notes — order_id is guaranteed
+ * present on every payment entity, whereas note propagation from order to
+ * payment isn't guaranteed by Razorpay for plain Orders.
+ */
+async function handleOneTimePaymentCaptured(payload) {
+  const payment = payload?.payment?.entity
+  const invoice = payment?.order_id
+    ? await Invoice.findOne({ razorpayOrderId: payment.order_id })
+    : null
+
+  if (!invoice) {
+    // Not one of ours — most likely a SaaS-subscription charge, which
+    // Razorpay also reports as payment.captured alongside
+    // subscription.charged (handled below).
+    console.log('[Razorpay webhook] payment.captured with no matching invoice — ignored')
+    return
+  }
+
+  await fulfillInvoicePayment({
+    invoiceId: invoice._id,
+    razorpayPaymentId: payment.id,
+    method: payment.method,
+  })
+}
+
 export async function handleWebhookEvent(event, payload) {
+  if (event === 'payment.captured') {
+    await handleOneTimePaymentCaptured(payload)
+    return
+  }
+
   const sub   = payload?.subscription?.entity || payload?.payment?.entity
   if (!sub) return
 

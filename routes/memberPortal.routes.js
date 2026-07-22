@@ -138,7 +138,8 @@ router.get('/invoices', async (req, res, next) => {
         .sort({ createdAt: -1 })
         .skip((page - 1) * limit)
         .limit(Number(limit))
-        .populate('planId', 'name durationDays'),
+        .populate('planId', 'name durationDays')
+        .populate('ptPlanId', 'name numberOfClasses durationDays'),
       Invoice.countDocuments({ gymId: req.gymId, memberId: req.memberId }),
     ])
     res.json({ invoices, total, page: Number(page), pages: Math.ceil(total / limit) })
@@ -150,6 +151,7 @@ router.get('/invoices/:id', async (req, res, next) => {
   try {
     const invoice = await Invoice.findOne({ _id: req.params.id, memberId: req.memberId })
       .populate('planId', 'name durationDays price')
+      .populate('ptPlanId', 'name numberOfClasses durationDays fee')
     if (!invoice) return res.status(404).json({ message: 'Invoice not found' })
     res.json(invoice)
   } catch (err) { next(err) }

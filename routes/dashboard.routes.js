@@ -3,6 +3,7 @@ import Member     from '../models/Member.js'
 import Invoice    from '../models/Invoice.js'
 import Lead       from '../models/Lead.js'
 import Attendance from '../models/Attendance.js'
+import Complaint  from '../models/Complaint.js'
 import { protect, authorize } from '../middleware/auth.js'
 
 const router = Router()
@@ -20,7 +21,7 @@ router.get('/', protect, authorize('owner', 'manager'), async (req, res, next) =
       totalActive, totalExpired, newThisMonth,
       expiringIn7, expiringIn30, todayAttendance,
       monthRevenue, pendingInvoices, openLeads,
-      recentMembers, revenueByMonth,
+      recentMembers, revenueByMonth, openComplaints,
     ] = await Promise.all([
       Member.countDocuments({ gymId, membershipStatus: 'active',  isActive: true }),
       Member.countDocuments({ gymId, membershipStatus: 'expired', isActive: true }),
@@ -44,6 +45,7 @@ router.get('/', protect, authorize('owner', 'manager'), async (req, res, next) =
         { $group: { _id: { year: { $year: '$paidAt' }, month: { $month: '$paidAt' } }, revenue: { $sum: '$totalAmount' }, count: { $sum: 1 } } },
         { $sort: { '_id.year': 1, '_id.month': 1 } },
       ]),
+      Complaint.countDocuments({ gymId, status: { $in: ['open', 'in-progress'] } }),
     ])
 
     res.json({
@@ -51,6 +53,7 @@ router.get('/', protect, authorize('owner', 'manager'), async (req, res, next) =
       attendance: { today: todayAttendance },
       revenue:  { thisMonth: monthRevenue[0]?.total || 0, pendingAmount: pendingInvoices[0]?.total || 0, pendingCount: pendingInvoices[0]?.count || 0, trend: revenueByMonth },
       leads:    { open: openLeads },
+      complaints: { open: openComplaints },
       recentMembers,
     })
   } catch (err) { next(err) }

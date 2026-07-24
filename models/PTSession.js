@@ -8,6 +8,7 @@ const ptExerciseSchema = new Schema({
   durationSec: { type: Number },
   restSec: { type: Number },
   notes: { type: String },
+  muscleGroup: { type: String, trim: true }, // chest/back/shoulders/biceps/triceps/legs/core/other
 }, { _id: false })
 
 const ptSessionSchema = new Schema(

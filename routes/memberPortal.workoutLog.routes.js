@@ -46,6 +46,7 @@ router.post('/', async (req, res, next) => {
           sets: e.sets !== undefined && e.sets !== '' ? Number(e.sets) : undefined,
           reps: e.reps !== undefined && e.reps !== '' ? String(e.reps).slice(0, 20) : undefined,
           weight: e.weight !== undefined && e.weight !== '' ? Number(e.weight) : undefined,
+          muscleGroup: e.muscleGroup ? String(e.muscleGroup).slice(0, 30) : undefined,
         }))
       : []
 
@@ -143,6 +144,7 @@ router.patch('/:id', async (req, res, next) => {
             sets: e.sets !== undefined && e.sets !== '' ? Number(e.sets) : undefined,
             reps: e.reps !== undefined && e.reps !== '' ? String(e.reps).slice(0, 20) : undefined,
             weight: e.weight !== undefined && e.weight !== '' ? Number(e.weight) : undefined,
+            muscleGroup: e.muscleGroup ? String(e.muscleGroup).slice(0, 30) : undefined,
           }))
         : log.exercises
     }

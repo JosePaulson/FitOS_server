@@ -5,6 +5,7 @@ const logExerciseSchema = new Schema({
   sets:   { type: Number },
   reps:   { type: String },   // plain number or a range like "8-12"
   weight: { type: Number },   // kg used
+  muscleGroup: { type: String, trim: true }, // chest/back/shoulders/biceps/triceps/legs/core/other
 }, { _id: false })
 
 /**

@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { body, validationResult } from 'express-validator'
 import WorkoutLibrary from '../models/WorkoutLibrary.js'
+import ExerciseCategory from '../models/ExerciseCategory.js'
 import { protect, authorize } from '../middleware/auth.js'
 import { uploadWorkoutMedia, handleUploadErrors } from '../middleware/upload.js'
 import { uploadImageBuffer, uploadVideoBuffer, deleteAsset } from '../services/cloudinaryUpload.service.js'
@@ -43,7 +44,12 @@ router.post('/',
   async (req, res, next) => {
     if (!validate(req, res)) return
     try {
-      const { name, category, description } = req.body
+      const { name, description } = req.body
+      const category = (req.body.category || '').trim().toLowerCase()
+      if (category) {
+        const exists = await ExerciseCategory.findOne({ gymId: req.gymId, key: category })
+        if (!exists) return res.status(400).json({ message: 'Unknown category — pick one from the exercise catalog' })
+      }
       const doc = { gymId: req.gymId, name, category, description }
 
       if (req.files?.image?.[0]) {
@@ -84,7 +90,14 @@ router.patch('/:id',
 
       const { name, category, description, isActive } = req.body
       if (name        !== undefined) workout.name        = name
-      if (category    !== undefined) workout.category    = category
+      if (category    !== undefined) {
+        const key = category.trim().toLowerCase()
+        if (key) {
+          const exists = await ExerciseCategory.findOne({ gymId: req.gymId, key })
+          if (!exists) return res.status(400).json({ message: 'Unknown category — pick one from the exercise catalog' })
+        }
+        workout.category = key
+      }
       if (description !== undefined) workout.description = description
       if (isActive    !== undefined) workout.isActive     = isActive === 'true' || isActive === true
 

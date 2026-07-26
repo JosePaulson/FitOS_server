@@ -38,6 +38,7 @@ import workoutLibraryRoutes from './routes/workoutLibrary.routes.js'
 import memberPortalEquipmentRoutes from './routes/memberPortal.equipment.routes.js'
 import exerciseCatalogRoutes from './routes/exerciseCatalog.routes.js'
 import memberPortalExerciseCatalogRoutes from './routes/memberPortal.exerciseCatalog.routes.js'
+import memberPortalWorkoutLibraryRoutes from './routes/memberPortal.workoutLibrary.routes.js'
 import memberPortalPushRoutes from './routes/memberPortal.push.routes.js'
 import memberPortalFoodScanRoutes from './routes/memberPortal.foodScan.routes.js'
 import memberPortalPTPlanRoutes from './routes/memberPortal.ptPlan.routes.js'
@@ -131,6 +132,7 @@ app.use('/api/equipment', equipmentRoutes)
 app.use('/api/workout-library', workoutLibraryRoutes)
 app.use('/api/exercise-catalog', exerciseCatalogRoutes)
 app.use('/api/member-portal/exercise-catalog', memberPortalExerciseCatalogRoutes)
+app.use('/api/member-portal/workout-library', memberPortalWorkoutLibraryRoutes)
 app.use('/api/complaints', complaintRoutes)
 app.use('/api/staff-ratings', staffRatingRoutes)
 

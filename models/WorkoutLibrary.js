@@ -9,16 +9,17 @@ import { Schema, model } from 'mongoose'
  * name only, as free text). WorkoutLibrary is the shared, gym-wide catalog
  * that a trainer can optionally attach to a PT session so a member can see
  * exactly what a given exercise looks like.
+ *
+ * `category` is kept in sync with the gym's exercise catalog (see
+ * ExerciseCategory.key) rather than a fixed enum, so admins manage one set
+ * of categories everywhere — the workout-library routes validate this
+ * against ExerciseCategory on create/update.
  */
 const workoutLibrarySchema = new Schema(
   {
     gymId:       { type: Schema.Types.ObjectId, ref: 'Gym', required: true, index: true },
     name:        { type: String, required: true, trim: true },
-    category: {
-      type: String,
-      enum: ['strength', 'cardio', 'mobility', 'hiit', 'core', 'other'],
-      default: 'other',
-    },
+    category:    { type: String, trim: true, lowercase: true, default: '' },
     description: { type: String, default: '' },
 
     // Cloudinary — both optional, a workout can have either, both, or neither

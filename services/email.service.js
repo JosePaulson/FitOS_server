@@ -121,7 +121,7 @@
 // export async function sendEmail({ to, subject, html, text }) {
 //   if (!to) return   // silently skip if member has no email
 //   const mail = await getTransporter()
-//   const info = await mail.sendMail({ from: process.env.EMAIL_FROM || '"FitOS" <hello@fitos.in>', to, subject, html, text })
+//   const info = await mail.sendMail({ from: process.env.EMAIL_FROM || '"FitOS" <hello@f8os.in>', to, subject, html, text })
 //   if (process.env.NODE_ENV !== 'production') {
 //     console.log(`[email] ✉️  To: ${to} | Subject: ${subject}`)
 //   }
@@ -277,7 +277,7 @@ import sgMail from '@sendgrid/mail'
  *   SENDGRID_API_KEY=SG.xxxxxxxxxxxxxxxxxxxx
  *
  * Optional:
- *   EMAIL_FROM="FitOS <hello@fitos.in>"   ← platform default sender
+ *   EMAIL_FROM="FitOS <hello@f8os.in>"   ← platform default sender
  *
  * In development, if SENDGRID_API_KEY is not set, emails are logged
  * to the console instead of being sent.

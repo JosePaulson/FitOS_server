@@ -94,22 +94,38 @@ router.get('/', async (req, res, next) => {
 
 /**
  * GET /api/member-portal/workout-logs/progress/body-weight
- * Combined bodyweight time series from self-logged workouts AND PT sessions
- * — one unified graph regardless of where a member's weight was recorded.
+ * Combined bodyweight + calories-burned time series from self-logged
+ * workouts AND PT sessions — one unified graph regardless of where a
+ * member's weight/session was recorded.
  * MUST be registered before GET /:id.
  */
 router.get('/progress/body-weight', async (req, res, next) => {
   try {
-    const [logs, sessions] = await Promise.all([
+    const [weightLogs, weightSessions, calorieLogs, calorieSessions] = await Promise.all([
       MemberWorkoutLog.find({ gymId: req.gymId, memberId: req.memberId, bodyWeight: { $exists: true, $ne: null } })
         .select('date bodyWeight').sort({ date: 1 }),
       PTSession.find({ gymId: req.gymId, memberId: req.memberId, bodyWeight: { $exists: true, $ne: null } })
         .select('date bodyWeight').sort({ date: 1 }),
+      MemberWorkoutLog.find({ gymId: req.gymId, memberId: req.memberId, caloriesBurned: { $exists: true, $ne: null } })
+        .select('date caloriesBurned').sort({ date: 1 }),
+      PTSession.find({ gymId: req.gymId, memberId: req.memberId, caloriesBurned: { $exists: true, $ne: null } })
+        .select('date caloriesBurned').sort({ date: 1 }),
     ])
 
-    const points = [...logs.map((l) => ({ date: l.date, bodyWeight: l.bodyWeight, source: 'workout' })),
-                     ...sessions.map((s) => ({ date: s.date, bodyWeight: s.bodyWeight, source: 'pt' }))]
-      .sort((a, b) => new Date(a.date) - new Date(b.date))
+    // Keyed by day so a bodyWeight entry and a caloriesBurned entry from
+    // the same date/session merge into one point instead of two.
+    const byDay = new Map()
+    function upsert(date, patch) {
+      const key = new Date(date).toDateString()
+      const existing = byDay.get(key) || { date }
+      byDay.set(key, { ...existing, ...patch })
+    }
+    for (const l of weightLogs)     upsert(l.date, { bodyWeight: l.bodyWeight })
+    for (const s of weightSessions) upsert(s.date, { bodyWeight: s.bodyWeight })
+    for (const l of calorieLogs)     upsert(l.date, { caloriesBurned: l.caloriesBurned })
+    for (const s of calorieSessions) upsert(s.date, { caloriesBurned: s.caloriesBurned })
+
+    const points = [...byDay.values()].sort((a, b) => new Date(a.date) - new Date(b.date))
 
     res.json({ points })
   } catch (err) { next(err) }

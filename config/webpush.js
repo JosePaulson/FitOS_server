@@ -4,7 +4,7 @@ const { VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT } = process.env
 
 if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
   webpush.setVapidDetails(
-    VAPID_SUBJECT || 'mailto:hello@fitos.in',
+    VAPID_SUBJECT || 'mailto:hello@f8os.in',
     VAPID_PUBLIC_KEY,
     VAPID_PRIVATE_KEY
   )

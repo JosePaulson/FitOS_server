@@ -21,7 +21,7 @@ export async function resolveGymSender(gymId) {
 
   // If gym has set their own email, use it.
   // Otherwise fall back to the platform address.
-  const from = emailFrom || process.env.EMAIL_FROM || '"FitOS" <hello@f8os.in>'
+  const from = emailFrom || process.env.EMAIL_FROM || '"FitOS" <info@f8os.in>'
 
   return { from, replyTo, gymName }
 }

@@ -96,7 +96,7 @@ router.post('/settings/test-email', protect, authorize('owner'), async (req, res
 
     const emailFrom = gym.settings?.emailFrom?.trim()
     const replyTo   = gym.settings?.replyTo?.trim() || undefined
-    const from      = emailFrom || process.env.EMAIL_FROM || '"FitOS" <hello@f8os.in>'
+    const from      = emailFrom || process.env.EMAIL_FROM || '"FitOS" <info@f8os.in>'
 
     // Send to the owner's own email (from req.user, populated by protect middleware)
     const to = req.user.email

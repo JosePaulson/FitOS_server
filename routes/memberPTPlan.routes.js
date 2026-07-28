@@ -69,10 +69,10 @@ router.post('/', protect, authorize('owner', 'manager', 'trainer'),
   }
 )
 
-/** PATCH /api/member-pt-plans/:id — reassign trainer / adjust dates */
+/** PATCH /api/member-pt-plans/:id — reassign trainer / adjust start & expiry dates */
 router.patch('/:id', protect, authorize('owner', 'manager'), async (req, res, next) => {
   try {
-    const allowed = ['trainerId', 'expiryDate', 'status']
+    const allowed = ['trainerId', 'startDate', 'expiryDate', 'status']
     const updates = {}
     allowed.forEach((k) => { if (req.body[k] !== undefined) updates[k] = req.body[k] })
     const assignment = await MemberPTPlan.findOneAndUpdate({ _id: req.params.id, gymId: req.gymId }, updates, { new: true, runValidators: true })

@@ -13,7 +13,7 @@ router.get('/', async (req, res, next) => {
     const { category } = req.query
     const filter = { gymId: req.gymId, isActive: true }
     if (category) filter.category = category
-    const workouts = await WorkoutLibrary.find(filter).sort({ name: 1 })
+    const workouts = await WorkoutLibrary.find(filter).sort({ category: 1, order: 1, name: 1 })
     res.json(workouts)
   } catch (err) { next(err) }
 })

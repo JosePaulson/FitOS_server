@@ -24,6 +24,22 @@ const memberAuthSchema = new Schema(
     isActive: { type: Boolean, default: true },
     lastLoginAt: { type: Date },
     refreshToken: { type: String, select: false },
+
+    // Fingerprint/biometric login (WebAuthn) — a member can register one
+    // credential per device from Profile settings, then use it instead of
+    // typing their PIN on that device going forward.
+    webauthnCredentials: [{
+      credentialId: { type: String, required: true }, // base64url credential ID
+      publicKey:    { type: String, required: true }, // base64-encoded COSE public key
+      counter:      { type: Number, default: 0 },      // replay-attack guard, per WebAuthn spec
+      deviceName:   { type: String, default: 'This device' },
+      transports:   [String],
+      createdAt:    { type: Date, default: Date.now },
+    }],
+    // Short-lived challenge for whichever WebAuthn ceremony is currently
+    // in flight (registration or login) — cleared once used or expired.
+    webauthnChallenge:           { type: String, select: false, default: null },
+    webauthnChallengeExpiresAt:  { type: Date,   select: false, default: null },
   },
   { timestamps: true }
 )

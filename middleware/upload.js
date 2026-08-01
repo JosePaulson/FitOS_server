@@ -2,6 +2,14 @@ import multer from 'multer'
 
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg']
 const VIDEO_TYPES = ['video/mp4', 'video/webm', 'video/quicktime']
+const DOCUMENT_TYPES = [
+  ...IMAGE_TYPES,
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',        // .xlsx
+]
 
 const IMAGE_MAX_BYTES = 5  * 1024 * 1024   // 5MB
 const VIDEO_MAX_BYTES = 30 * 1024 * 1024   // 30MB — generous ceiling; the real
@@ -42,6 +50,19 @@ export const uploadWorkoutMedia = multer({
   { name: 'image', maxCount: 1 },
   { name: 'video', maxCount: 1 },
 ])
+
+const DOCUMENT_MAX_BYTES = 15 * 1024 * 1024  // 15MB — plenty for a PDF/Word/Excel diet plan
+
+/**
+ * Single document upload — field name "file". Used by Diet Plans, where a
+ * trainer can hand a member a plan as a PDF/Word/Excel/image instead of
+ * (or alongside) building one out meal-by-meal.
+ */
+export const uploadDietFile = multer({
+  storage,
+  limits:     { fileSize: DOCUMENT_MAX_BYTES },
+  fileFilter: fileFilter(DOCUMENT_TYPES),
+}).single('file')
 
 /**
  * Wraps a multer middleware so its errors come back as normal JSON API

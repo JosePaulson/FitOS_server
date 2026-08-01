@@ -22,6 +22,12 @@ const workoutLibrarySchema = new Schema(
     category:    { type: String, trim: true, lowercase: true, default: '' },
     description: { type: String, default: '' },
 
+    // Where this item sits within its category's sequence — drives the
+    // order exercises/videos appear in the member portal's Videos tab.
+    // New items are appended to the end of their category by default;
+    // admins can reorder via PATCH /reorder.
+    order: { type: Number, default: 0 },
+
     // Cloudinary — both optional, a workout can have either, both, or neither
     imageUrl:      { type: String, default: '' },
     imagePublicId: { type: String, default: '' },

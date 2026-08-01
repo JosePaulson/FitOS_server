@@ -62,6 +62,39 @@ export function uploadVideoBuffer(buffer, folder, maxDurationSec = 20) {
 }
 
 /**
+ * Uploads an arbitrary document (PDF, Word, Excel) or image buffer to
+ * Cloudinary as a downloadable asset. Uses resource_type "auto" so
+ * Cloudinary picks the right handling per file type — images get served
+ * as images, everything else (PDF/DOCX/XLSX) as a raw downloadable file
+ * — without us needing to branch on mimetype ourselves.
+ *
+ * @param {Buffer} buffer
+ * @param {string}  folder    e.g. 'fitos/diet-plans'
+ * @param {string}  filename  original filename, preserved so the
+ *                            downloaded file doesn't end up named after a
+ *                            random Cloudinary asset id
+ * @returns {Promise<{ url: string, publicId: string }>}
+ */
+export function uploadDocumentBuffer(buffer, folder, filename) {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder,
+        resource_type: 'auto',
+        use_filename: true,
+        unique_filename: true,
+        filename_override: filename,
+      },
+      (err, result) => {
+        if (err) return reject(new Error(err.message || 'File upload failed'))
+        resolve({ url: result.secure_url, publicId: result.public_id, resourceType: result.resource_type })
+      }
+    )
+    stream.end(buffer)
+  })
+}
+
+/**
  * Deletes a previously-uploaded asset (used when replacing or removing
  * an equipment photo / workout image / workout video).
  */

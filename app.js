@@ -57,6 +57,13 @@ await connectDB()
 
 const app = express()
 
+// Render (and most PaaS hosts) sit the app behind a reverse proxy, so
+// without this, req.ip resolves to the proxy's own address for every
+// request — which would make the IP-based rate limiters below treat all
+// traffic as coming from one single "IP" instead of each visitor's real
+// one. `1` trusts exactly one hop (the platform's own proxy).
+app.set('trust proxy', 1)
+
 // A fresh value every time the process boots — the simplest reliable signal
 // that "the server was redeployed", without needing a manual version bump.
 // The frontends poll GET /api/version and prompt to reload if this changes
@@ -81,6 +88,11 @@ app.use(express.json({ limit: '5mb' }))
 app.use(express.urlencoded({ extended: true }))
 
 // ── Rate limiters ─────────────────────────────────────────────────────────
+// Both limiters key on plain client IP (express-rate-limit's default
+// keyGenerator, req.ip) — no per-user or per-gym logic layered on top.
+// The general limit is generous (200/15min) specifically because many
+// members hit the API from the same gym WiFi, i.e. the same public IP;
+// a tighter per-IP limit would end up throttling a whole gym at once.
 const rateLimitHandler = (req, res, _next, options) => {
   res.status(options.statusCode).json({ message: options.message })
 }
@@ -92,6 +104,9 @@ app.use('/api', rateLimit({
   handler: rateLimitHandler,
 }))
 
+// Auth attempts stay tighter — brute-forcing logins/OTPs is the actual
+// risk here, and legitimate retries from a shared gym IP are rare enough
+// that this doesn't need the same headroom as general API traffic.
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, max: 20,
   message: 'Too many auth attempts, please try again later.',

@@ -27,6 +27,18 @@ const dietPlanSchema = new Schema(
     targetCarbs:    { type: Number },
     targetFat:      { type: Number },
     meals:          [mealSchema],
+
+    // Optional file attachment (PDF, Word, Excel, image) — lets a
+    // trainer hand a member a diet plan as a document instead of (or in
+    // addition to) building it out meal-by-meal above. Downloadable from
+    // the member portal's Diet tab.
+    fileUrl:       { type: String, default: null },
+    fileName:      { type: String, default: null },
+    fileType:      { type: String, default: null }, // original mimetype
+    fileSizeBytes: { type: Number, default: null },
+    filePublicId:  { type: String, default: null },  // Cloudinary asset id, for cleanup
+    fileResourceType: { type: String, default: null }, // 'image' | 'raw' — Cloudinary needs this to delete correctly
+
     assignedTo:     [{ type: Schema.Types.ObjectId, ref: 'Member' }],
     createdBy:      { type: Schema.Types.ObjectId, ref: 'User' },
     isTemplate:     { type: Boolean, default: false },

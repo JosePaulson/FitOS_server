@@ -21,7 +21,7 @@ router.get('/', protect, async (req, res, next) => {
     const { category } = req.query
     const filter = { gymId: req.gymId, isActive: true }
     if (category) filter.category = category
-    const workouts = await WorkoutLibrary.find(filter).sort({ name: 1 })
+    const workouts = await WorkoutLibrary.find(filter).sort({ category: 1, order: 1, name: 1 })
     res.json(workouts)
   } catch (err) { next(err) }
 })
@@ -51,6 +51,8 @@ router.post('/',
         if (!exists) return res.status(400).json({ message: 'Unknown category — pick one from the exercise catalog' })
       }
       const doc = { gymId: req.gymId, name, category, description }
+      // New items go to the end of their category's sequence by default.
+      doc.order = await WorkoutLibrary.countDocuments({ gymId: req.gymId, category })
 
       if (req.files?.image?.[0]) {
         const img = await uploadImageBuffer(req.files.image[0].buffer, 'fitos/workouts')
@@ -74,6 +76,42 @@ router.post('/',
 
       const workout = await WorkoutLibrary.create(doc)
       res.status(201).json(workout)
+    } catch (err) { next(err) }
+  }
+)
+
+// PATCH /api/workout-library/reorder — owner, manager, trainer
+// Body: { category, orderedIds: [...] }. Sets each item's `order` to its
+// index in orderedIds, so the member portal's Videos tab plays them back
+// in exactly this sequence. Registered before PATCH /:id so "reorder"
+// isn't swallowed as an :id.
+router.patch('/reorder',
+  protect,
+  authorize('owner', 'manager', 'trainer'),
+  [
+    body('category').trim().notEmpty().withMessage('Category is required'),
+    body('orderedIds').isArray({ min: 1 }).withMessage('orderedIds must be a non-empty array'),
+  ],
+  async (req, res, next) => {
+    if (!validate(req, res)) return
+    try {
+      const category = req.body.category.trim().toLowerCase()
+      const { orderedIds } = req.body
+
+      // Only reorder items that actually belong to this gym + category —
+      // silently ignores anything else so a stale client-side list can't
+      // reorder items it shouldn't touch.
+      const items = await WorkoutLibrary.find({ gymId: req.gymId, category, _id: { $in: orderedIds } }).select('_id')
+      const validIds = new Set(items.map((i) => i._id.toString()))
+
+      await Promise.all(
+        orderedIds
+          .filter((id) => validIds.has(id))
+          .map((id, index) => WorkoutLibrary.updateOne({ _id: id, gymId: req.gymId }, { $set: { order: index } }))
+      )
+
+      const workouts = await WorkoutLibrary.find({ gymId: req.gymId, category }).sort({ order: 1, name: 1 })
+      res.json(workouts)
     } catch (err) { next(err) }
   }
 )

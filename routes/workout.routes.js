@@ -4,6 +4,8 @@ import DietPlan    from '../models/DietPlan.js'
 import { protect, authorize } from '../middleware/auth.js'
 import { sendPushToMembers } from '../services/pushNotification.service.js'
 import { seedPrebuiltPlansForGym } from '../utils/seedPrebuiltPlans.js'
+import { uploadDietFile, handleUploadErrors } from '../middleware/upload.js'
+import { uploadDocumentBuffer, deleteAsset } from '../services/cloudinaryUpload.service.js'
 
 const router = Router()
 
@@ -114,22 +116,68 @@ router.get('/diet', protect, async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
-router.post('/diet', protect, authorize('owner', 'manager', 'trainer'), async (req, res, next) => {
+router.post('/diet', protect, authorize('owner', 'manager', 'trainer'), handleUploadErrors(uploadDietFile), async (req, res, next) => {
   try {
-    const { name, description, goal, targetCalories, targetProtein, targetCarbs, targetFat, meals, isTemplate } = req.body
+    const { name, description, goal, targetCalories, targetProtein, targetCarbs, targetFat, isTemplate } = req.body
     if (!name) return res.status(400).json({ message: 'Plan name is required' })
-    const plan = await DietPlan.create({ gymId: req.gymId, name, description, goal, targetCalories, targetProtein, targetCarbs, targetFat, meals: meals || [], isTemplate: !!isTemplate, createdBy: req.user._id })
+
+    let meals = []
+    if (req.body.meals) {
+      try { meals = JSON.parse(req.body.meals) } catch { meals = [] }
+    }
+
+    const doc = { gymId: req.gymId, name, description, goal, targetCalories, targetProtein, targetCarbs, targetFat, meals, isTemplate: !!isTemplate, createdBy: req.user._id }
+
+    if (req.file) {
+      const uploaded = await uploadDocumentBuffer(req.file.buffer, 'fitos/diet-plans', req.file.originalname)
+      doc.fileUrl = uploaded.url
+      doc.filePublicId = uploaded.publicId
+      doc.fileResourceType = uploaded.resourceType
+      doc.fileName = req.file.originalname
+      doc.fileType = req.file.mimetype
+      doc.fileSizeBytes = req.file.size
+    }
+
+    const plan = await DietPlan.create(doc)
     res.status(201).json(plan)
   } catch (err) { next(err) }
 })
 
-router.patch('/diet/:id', protect, authorize('owner', 'manager', 'trainer'), async (req, res, next) => {
+router.patch('/diet/:id', protect, authorize('owner', 'manager', 'trainer'), handleUploadErrors(uploadDietFile), async (req, res, next) => {
   try {
-    const allowed = ['name','description','goal','targetCalories','targetProtein','targetCarbs','targetFat','meals','isTemplate']
+    const existing = await DietPlan.findOne({ _id: req.params.id, gymId: req.gymId })
+    if (!existing) return res.status(404).json({ message: 'Diet plan not found' })
+
+    const allowed = ['name','description','goal','targetCalories','targetProtein','targetCarbs','targetFat','isTemplate']
     const updates = {}
     allowed.forEach((k) => { if (req.body[k] !== undefined) updates[k] = req.body[k] })
+    if (req.body.meals !== undefined) {
+      try { updates.meals = JSON.parse(req.body.meals) } catch { /* leave meals untouched if unparsable */ }
+    }
+
+    // A newly uploaded file replaces any existing one; `removeFile: true`
+    // (with no new file) clears an existing attachment instead. Either
+    // way the old Cloudinary asset is cleaned up rather than orphaned.
+    if (req.file) {
+      if (existing.filePublicId) await deleteAsset(existing.filePublicId, existing.fileResourceType || 'raw')
+      const uploaded = await uploadDocumentBuffer(req.file.buffer, 'fitos/diet-plans', req.file.originalname)
+      updates.fileUrl = uploaded.url
+      updates.filePublicId = uploaded.publicId
+      updates.fileResourceType = uploaded.resourceType
+      updates.fileName = req.file.originalname
+      updates.fileType = req.file.mimetype
+      updates.fileSizeBytes = req.file.size
+    } else if (req.body.removeFile === 'true' && existing.filePublicId) {
+      await deleteAsset(existing.filePublicId, existing.fileResourceType || 'raw')
+      updates.fileUrl = null
+      updates.filePublicId = null
+      updates.fileResourceType = null
+      updates.fileName = null
+      updates.fileType = null
+      updates.fileSizeBytes = null
+    }
+
     const plan = await DietPlan.findOneAndUpdate({ _id: req.params.id, gymId: req.gymId }, updates, { new: true })
-    if (!plan) return res.status(404).json({ message: 'Diet plan not found' })
 
     if (plan.assignedTo?.length) {
       sendPushToMembers(plan.assignedTo, {

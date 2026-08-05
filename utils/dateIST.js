@@ -38,6 +38,24 @@ export function istStartOfDay(d) {
   return istDateTime(istDateKey(d), '00:00')
 }
 
+/**
+ * End of the IST calendar day (23:59:59.999 IST) containing `d`, as a UTC
+ * Date instant. Use this (not istStartOfDay of the same date) whenever a
+ * date field represents the LAST day something is valid/included — e.g. a
+ * PT plan's expiryDate — so anything that happened later that same day
+ * still counts as "within range" instead of being cut off at midnight.
+ */
+export function istEndOfDay(d) {
+  return new Date(istStartOfDay(d).getTime() + 24 * 60 * 60 * 1000 - 1)
+}
+
+/** IST calendar-date key `days` days after `dateKey` (negative to go back). */
+export function istAddDays(dateKey, days) {
+  const [y, m, d] = dateKey.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, m - 1, d + days))
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`
+}
+
 /** "Now", as an IST calendar-day key — the IST equivalent of `new Date().toISOString().split('T')[0]`. */
 export function todayISTKey() {
   return istDateKey(new Date())

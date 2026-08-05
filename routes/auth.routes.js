@@ -1,10 +1,13 @@
 import { Router }   from 'express'
 import jwt          from 'jsonwebtoken'
+import crypto       from 'crypto'
+import bcrypt        from 'bcryptjs'
 import { body, validationResult } from 'express-validator'
 import Gym  from '../models/Gym.js'
 import User from '../models/User.js'
 import { protect } from '../middleware/auth.js'
 import { seedPrebuiltPlansForGym } from '../utils/seedPrebuiltPlans.js'
+import { sendEmail } from '../services/email.service.js'
 
 const router = Router()
 
@@ -129,6 +132,99 @@ router.post('/logout', protect, async (req, res, next) => {
     res.json({ message: 'Logged out' })
   } catch (err) { next(err) }
 })
+
+// PATCH /api/auth/change-password — signed-in user changes their own password
+router.patch('/change-password',
+  protect,
+  [
+    body('currentPassword').notEmpty().withMessage('Current password is required'),
+    body('newPassword').isLength({ min: 6 }).withMessage('New password must be at least 6 characters'),
+  ],
+  async (req, res, next) => {
+    if (!validate(req, res)) return
+    try {
+      const user = await User.findById(req.user._id).select('+passwordHash')
+      const ok = await user.comparePassword(req.body.currentPassword)
+      if (!ok) return res.status(401).json({ message: 'Current password is incorrect' })
+
+      // User.passwordHash isn't auto-hashed by a pre-save hook in this
+      // schema, so hash it explicitly here to match comparePassword's
+      // bcrypt.compare usage.
+      user.passwordHash = await bcrypt.hash(req.body.newPassword, 10)
+      // Rotate the refresh token so other sessions are signed out.
+      user.refreshToken = undefined
+      await user.save({ validateBeforeSave: false })
+
+      res.json({ message: 'Password changed successfully' })
+    } catch (err) { next(err) }
+  }
+)
+
+// POST /api/auth/forgot-password — request a reset link by email
+router.post('/forgot-password',
+  [body('email').isEmail().withMessage('Valid email required')],
+  async (req, res, next) => {
+    if (!validate(req, res)) return
+    try {
+      const user = await User.findOne({ email: req.body.email.toLowerCase() })
+
+      // Always respond the same way whether or not the email exists, so
+      // this endpoint can't be used to enumerate registered accounts.
+      const genericResponse = { message: 'If an account exists for that email, a reset link has been sent.' }
+      if (!user) return res.json(genericResponse)
+
+      const rawToken = crypto.randomBytes(32).toString('hex')
+      user.resetPasswordToken = crypto.createHash('sha256').update(rawToken).digest('hex')
+      user.resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000) // 1 hour
+      await user.save({ validateBeforeSave: false })
+
+      const gym = await Gym.findById(user.gymId).select('name')
+      const resetUrl = `${process.env.CLIENT_URL || ''}/reset-password/${rawToken}`
+
+      sendEmail({
+        to: user.email,
+        subject: 'Reset your FitOS password',
+        html: `
+          <div style="font-family:sans-serif;max-width:480px;margin:0 auto;color:#1a1a1a">
+            <h2 style="margin:0 0 8px">Reset your password</h2>
+            <p style="color:#555">We received a request to reset the password for your ${gym?.name || 'FitOS'} account.</p>
+            <p style="margin:24px 0">
+              <a href="${resetUrl}" style="display:inline-block;background:#C8F135;color:#0D0D0D;font-weight:700;padding:10px 20px;border-radius:8px;text-decoration:none">Reset password</a>
+            </p>
+            <p style="color:#888;font-size:13px">This link expires in 1 hour. If you didn't request this, you can safely ignore this email.</p>
+          </div>
+        `,
+      }).catch((e) => console.error('[forgot-password] Failed to send email:', e.message))
+
+      res.json(genericResponse)
+    } catch (err) { next(err) }
+  }
+)
+
+// POST /api/auth/reset-password/:token — set a new password using a reset link
+router.post('/reset-password/:token',
+  [body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters')],
+  async (req, res, next) => {
+    if (!validate(req, res)) return
+    try {
+      const hashedToken = crypto.createHash('sha256').update(req.params.token).digest('hex')
+      const user = await User.findOne({
+        resetPasswordToken: hashedToken,
+        resetPasswordExpires: { $gt: new Date() },
+      }).select('+resetPasswordToken +resetPasswordExpires')
+
+      if (!user) return res.status(400).json({ message: 'This reset link is invalid or has expired' })
+
+      user.passwordHash = await bcrypt.hash(req.body.password, 10)
+      user.resetPasswordToken = undefined
+      user.resetPasswordExpires = undefined
+      user.refreshToken = undefined // sign out existing sessions
+      await user.save({ validateBeforeSave: false })
+
+      res.json({ message: 'Password reset successfully. You can now sign in.' })
+    } catch (err) { next(err) }
+  }
+)
 
 // GET /api/auth/me
 router.get('/me', protect, async (req, res) => {

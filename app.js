@@ -25,6 +25,7 @@ import attendanceRoutes from './routes/attendance.routes.js'
 import dashboardRoutes from './routes/dashboard.routes.js'
 import workoutRoutes from './routes/workout.routes.js'
 import staffRoutes from './routes/staff.routes.js'
+import staffPayrollRoutes from './routes/staffPayroll.routes.js'
 import subscriptionRoutes from './routes/subscription.routes.js'
 import saasAdminRoutes from './routes/saasAdmin.routes.js'
 import gymRoutes from './routes/gym.routes.js'
@@ -51,6 +52,8 @@ import complaintRoutes from './routes/complaint.routes.js'
 import memberPortalComplaintRoutes from './routes/memberPortal.complaint.routes.js'
 import staffRatingRoutes from './routes/staffRating.routes.js'
 import memberPortalStaffRatingRoutes from './routes/memberPortal.staffRating.routes.js'
+import leaveRoutes from './routes/leave.routes.js'
+import reimbursementRoutes from './routes/reimbursement.routes.js'
 
 // ── Connect DB ────────────────────────────────────────────────────────────
 await connectDB()
@@ -126,6 +129,7 @@ app.use('/api/attendance', attendanceRoutes)
 app.use('/api/dashboard', dashboardRoutes)
 app.use('/api/workout-plans', workoutRoutes)
 app.use('/api/staff', staffRoutes)
+app.use('/api/staff-payroll', staffPayrollRoutes)
 app.use('/api/subscriptions', subscriptionRoutes)
 app.use('/api/saas-admin', saasAdminRoutes)
 app.use('/api/gym', gymRoutes)
@@ -152,6 +156,8 @@ app.use('/api/member-portal/exercise-catalog', memberPortalExerciseCatalogRoutes
 app.use('/api/member-portal/workout-library', memberPortalWorkoutLibraryRoutes)
 app.use('/api/complaints', complaintRoutes)
 app.use('/api/staff-ratings', staffRatingRoutes)
+app.use('/api/leave', leaveRoutes)
+app.use('/api/reimbursements', reimbursementRoutes)
 
 // ── Health check ──────────────────────────────────────────────────────────
 // Deliberately mounted before rate limiting, auth, and DB-dependent logic —

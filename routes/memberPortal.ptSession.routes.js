@@ -5,7 +5,7 @@ import PTSession from '../models/PTSession.js'
 import User from '../models/User.js'
 import TrainerAvailability from '../models/TrainerAvailability.js'
 import TrainerTimeOff from '../models/TrainerTimeOff.js'
-import { istDayName, istDateKey, istTimeOfDay, istDateTime, istStartOfDay } from '../utils/dateIST.js'
+import { istDayName, istDateKey, istTimeOfDay, istDateTime, istStartOfDay, istEndOfDay } from '../utils/dateIST.js'
 
 const router = Router()
 router.use(memberProtect)
@@ -244,8 +244,13 @@ router.get('/', async (req, res, next) => {
     if (status) filter.status = status
     if (from || to) {
       filter.date = {}
-      if (from) filter.date.$gte = new Date(from)
-      if (to) filter.date.$lte = new Date(to)
+      // `from`/`to` arrive as date-only strings (e.g. "2026-08-31") from a
+      // calendar month view. `new Date(to)` casts that to 00:00:00 UTC —
+      // 5:30am IST — so any session later that day (i.e. almost any real
+      // session) would fail `$lte` and silently vanish from results near
+      // the end of the range. Anchor to full IST calendar days instead.
+      if (from) filter.date.$gte = istStartOfDay(from)
+      if (to) filter.date.$lte = istEndOfDay(to)
     }
 
     const [sessions, total] = await Promise.all([

@@ -13,7 +13,12 @@ function validate(req, res) {
 
 router.get('/', protect, authorize('owner', 'manager'), async (req, res, next) => {
   try {
-    const staff = await User.find({ gymId: req.gymId }).select('-passwordHash -refreshToken -resetPasswordToken').sort({ createdAt: -1 })
+    // Payroll/attendance/leave/reimbursement screens pass ?excludeOwner=true
+    // since the owner isn't "staff" for those purposes (no attendance, no
+    // base pay, doesn't submit leave/reimbursement requests).
+    const filter = { gymId: req.gymId }
+    if (req.query.excludeOwner === 'true') filter.role = { $ne: 'owner' }
+    const staff = await User.find(filter).select('-passwordHash -refreshToken -resetPasswordToken').sort({ createdAt: -1 })
     res.json(staff)
   } catch (err) { next(err) }
 })

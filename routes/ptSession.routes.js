@@ -6,6 +6,7 @@ import { protect, authorize } from '../middleware/auth.js'
 import { sendPushToMember } from '../services/pushNotification.service.js'
 import { syncMemberPTPlans } from '../services/ptPlanSync.service.js'
 import { estimateCaloriesBurned } from '../utils/calories.js'
+import { istStartOfDay, istEndOfDay } from '../utils/dateIST.js'
 
 const router = Router()
 
@@ -73,8 +74,11 @@ router.get('/', protect, authorize('owner', 'manager', 'trainer'), async (req, r
 
     if (from || to) {
       filter.date = {}
-      if (from) filter.date.$gte = new Date(from)
-      if (to) filter.date.$lte = new Date(to)
+      // Date-only strings (e.g. "2026-08-31") would otherwise cast to UTC
+      // midnight — 5:30am IST — silently excluding same-day sessions later
+      // than that from the range. Anchor to full IST calendar days instead.
+      if (from) filter.date.$gte = istStartOfDay(from)
+      if (to) filter.date.$lte = istEndOfDay(to)
     }
 
     const [sessions, total] = await Promise.all([
@@ -158,7 +162,12 @@ router.post('/',
         WORKOUT_POPULATE,
       ])
 
-      syncMemberPTPlans(req.gymId, memberId).catch((e) => console.error('[pt-plan-sync] create failed:', e.message))
+      // Awaited — a trainer creating a session often immediately reloads
+      // the member's PT plan progress, and a fire-and-forget sync here
+      // could lose that race and hand back the pre-update classesUsed.
+      try {
+        await syncMemberPTPlans(req.gymId, memberId)
+      } catch (e) { console.error('[pt-plan-sync] create failed:', e.message) }
 
       res.status(201).json(populated)
     } catch (err) { next(err) }
@@ -201,9 +210,13 @@ router.patch('/:id',
 
       if (!session) return res.status(404).json({ message: 'Session not found or access denied' })
 
+      // Awaited (unlike the push notification below) — status/date changes
+      // shift which plan window a session falls in, and the caller may
+      // reload plan progress right after this resolves.
       if (updates.status !== undefined || updates.date !== undefined) {
-        syncMemberPTPlans(req.gymId, session.memberId?._id || session.memberId)
-          .catch((e) => console.error('[pt-plan-sync] update failed:', e.message))
+        try {
+          await syncMemberPTPlans(req.gymId, session.memberId?._id || session.memberId)
+        } catch (e) { console.error('[pt-plan-sync] update failed:', e.message) }
       }
 
       // Notify the member — fire-and-forget, never blocks the response
@@ -325,7 +338,9 @@ router.delete('/:id', protect, authorize('owner', 'manager', 'trainer'), async (
     const session = await PTSession.findOneAndDelete(filter)
     if (!session) return res.status(404).json({ message: 'Session not found or access denied' })
     if (session.status === 'completed') {
-      syncMemberPTPlans(req.gymId, session.memberId).catch((e) => console.error('[pt-plan-sync] delete failed:', e.message))
+      try {
+        await syncMemberPTPlans(req.gymId, session.memberId)
+      } catch (e) { console.error('[pt-plan-sync] delete failed:', e.message) }
     }
     res.json({ message: 'Session deleted' })
   } catch (err) { next(err) }

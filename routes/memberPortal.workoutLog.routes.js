@@ -4,6 +4,7 @@ import MemberWorkoutLog from '../models/MemberWorkoutLog.js'
 import PTSession from '../models/PTSession.js'
 import Member from '../models/Member.js'
 import { estimateCaloriesBurned } from '../utils/calories.js'
+import { istStartOfDay, istEndOfDay } from '../utils/dateIST.js'
 
 const router = Router()
 router.use(memberProtect)
@@ -82,8 +83,11 @@ router.get('/', async (req, res, next) => {
     const filter = { gymId: req.gymId, memberId: req.memberId }
     if (from || to) {
       filter.date = {}
-      if (from) filter.date.$gte = new Date(from)
-      if (to) filter.date.$lte = new Date(to)
+      // See memberPortal.ptSession.routes.js for why this can't be a plain
+      // `new Date(to)` — that casts to UTC midnight (5:30am IST), silently
+      // dropping same-day logs made later than that.
+      if (from) filter.date.$gte = istStartOfDay(from)
+      if (to) filter.date.$lte = istEndOfDay(to)
     }
     const logs = await MemberWorkoutLog.find(filter)
       .sort({ date: -1 })

@@ -60,3 +60,43 @@ export function istAddDays(dateKey, days) {
 export function todayISTKey() {
   return istDateKey(new Date())
 }
+
+// Sunday-first, matching istDayName()/DAY_NAMES above — used to walk
+// forward from "today" to the next matching weekday below.
+const DAY_ORDER = DAY_NAMES
+
+/**
+ * The next upcoming instant (as a UTC Date) at which a recurring WEEKLY IST
+ * slot — identified by weekday name ('monday'..'sunday') + "HH:mm" wall-clock
+ * start time — occurs. Returns today's occurrence if it hasn't started yet,
+ * otherwise next week's. Used by the weekly Timetable feature, where a slot
+ * isn't a single date but a standing weekly booking, so "2 hours before the
+ * slot" has to be resolved against whichever occurrence is coming up next.
+ */
+export function nextWeekdayOccurrence(weekday, hhmm, from = new Date()) {
+  const targetIdx = DAY_ORDER.indexOf(weekday)
+  if (targetIdx === -1) throw new Error(`Invalid weekday: ${weekday}`)
+
+  const todayKey = istDateKey(from)
+  const todayIdx = DAY_ORDER.indexOf(istDayName(from))
+  const daysAhead = (targetIdx - todayIdx + 7) % 7
+
+  let candidate = istDateTime(istAddDays(todayKey, daysAhead), hhmm)
+  // Same weekday as today but that time has already passed (or is exactly
+  // now) — the next occurrence is a full week out, not "today" again.
+  if (candidate.getTime() <= from.getTime()) {
+    candidate = istDateTime(istAddDays(todayKey, daysAhead + 7), hhmm)
+  }
+  return candidate
+}
+
+/**
+ * True once it's too late to cancel a recurring weekly slot — i.e. the
+ * next occurrence of that weekday/time is less than `hoursBefore` hours
+ * away. Shared by both the trainer- and member-facing Timetable cancel
+ * endpoints so the cutoff behaves identically for everyone.
+ */
+export function isPastCancellationDeadline(weekday, hhmm, hoursBefore = 2, from = new Date()) {
+  const occurrence = nextWeekdayOccurrence(weekday, hhmm, from)
+  return occurrence.getTime() - from.getTime() < hoursBefore * 60 * 60 * 1000
+}

@@ -290,10 +290,16 @@ router.get('/progress/body-weight', async (req, res, next) => {
     const sessions = await PTSession.find({
       gymId: req.gymId,
       memberId: req.memberId,
-      bodyWeight: { $exists: true, $ne: null },
+      // A session counts here if it has EITHER a body weight or a calories
+      // reading — the weight-progress chart plots both, and one metric
+      // being logged without the other shouldn't hide the whole session.
+      $or: [
+        { bodyWeight: { $exists: true, $ne: null } },
+        { caloriesBurned: { $exists: true, $ne: null } },
+      ],
     })
       .sort({ date: 1 })
-      .select('date bodyWeight bodyFat title status')
+      .select('date bodyWeight bodyFat caloriesBurned title status')
     res.json(sessions)
   } catch (err) { next(err) }
 })

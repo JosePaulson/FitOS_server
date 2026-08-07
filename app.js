@@ -54,6 +54,8 @@ import staffRatingRoutes from './routes/staffRating.routes.js'
 import memberPortalStaffRatingRoutes from './routes/memberPortal.staffRating.routes.js'
 import leaveRoutes from './routes/leave.routes.js'
 import reimbursementRoutes from './routes/reimbursement.routes.js'
+import timetableRoutes from './routes/timetable.routes.js'
+import memberPortalTimetableRoutes from './routes/memberPortal.timetable.routes.js'
 
 // ── Connect DB ────────────────────────────────────────────────────────────
 await connectDB()
@@ -146,6 +148,7 @@ app.use('/api/member-portal/workout-logs', memberPortalWorkoutLogRoutes)
 app.use('/api/member-portal/payments', memberPortalPaymentRoutes)
 app.use('/api/member-portal/complaints', memberPortalComplaintRoutes)
 app.use('/api/member-portal/staff-ratings', memberPortalStaffRatingRoutes)
+app.use('/api/member-portal/timetable', memberPortalTimetableRoutes)
 app.use('/api/member-portal', memberPortalRoutes)
 app.use('/api/pt-sessions', ptSessionRoutes)
 app.use('/api/workout-logs', workoutLogRoutes)
@@ -158,6 +161,7 @@ app.use('/api/complaints', complaintRoutes)
 app.use('/api/staff-ratings', staffRatingRoutes)
 app.use('/api/leave', leaveRoutes)
 app.use('/api/reimbursements', reimbursementRoutes)
+app.use('/api/timetable', timetableRoutes)
 
 // ── Health check ──────────────────────────────────────────────────────────
 // Deliberately mounted before rate limiting, auth, and DB-dependent logic —

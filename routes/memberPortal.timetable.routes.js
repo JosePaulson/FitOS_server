@@ -46,6 +46,10 @@ function toMemberView(slot, memberId) {
 }
 
 // ── GET /api/member-portal/timetable ────────────────────────────────────────
+// Only ever returns the member's OWN booked slots plus open slots — other
+// members' bookings are never sent to this client at all (not just hidden
+// in the UI), both for privacy and so the day-tab open-slot counts add up
+// correctly without extra client-side filtering.
 router.get('/', async (req, res, next) => {
   try {
     const activePlans = await requireActivePTPlans(req, res)
@@ -57,8 +61,12 @@ router.get('/', async (req, res, next) => {
       .populate(MEMBER_POPULATE)
       .populate(PLAN_POPULATE)
 
+    const visible = slots
+      .map((s) => toMemberView(s, req.memberId))
+      .filter((s) => s.status === 'empty' || s.member?.isMine)
+
     res.json({
-      slots: slots.map((s) => toMemberView(s, req.memberId)),
+      slots: visible,
       myActivePlans: activePlans.map((p) => ({ _id: p._id, name: p.name, trainerId: p.trainerId })),
     })
   } catch (err) { next(err) }

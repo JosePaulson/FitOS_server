@@ -56,6 +56,20 @@ export function istAddDays(dateKey, days) {
   return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`
 }
 
+/** Start of the IST week (Monday 00:00 IST) containing `d`, as a UTC Date instant. */
+export function istStartOfWeek(d) {
+  const key = istDateKey(d)
+  const dow = DAY_NAMES.indexOf(istDayName(d)) // Sunday=0..Saturday=6
+  const mondayOffset = dow === 0 ? -6 : 1 - dow // days to subtract to land on Monday
+  return istDateTime(istAddDays(key, mondayOffset), '00:00')
+}
+
+/** Start of the IST calendar month (1st, 00:00 IST) containing `d`, as a UTC Date instant. */
+export function istStartOfMonth(d) {
+  const [y, m] = istDateKey(d).split('-')
+  return istDateTime(`${y}-${m}-01`, '00:00')
+}
+
 /** "Now", as an IST calendar-day key — the IST equivalent of `new Date().toISOString().split('T')[0]`. */
 export function todayISTKey() {
   return istDateKey(new Date())

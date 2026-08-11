@@ -35,12 +35,36 @@ const memberPTPlanSchema = new Schema(
       onExpiry:        { type: Boolean, default: false },
       classesFinished: { type: Boolean, default: false },
     },
+
+    // Trainer's 50% commission payout for this plan, settled separately
+    // from the plan's own lifecycle — a plan can sit 'completed' for a
+    // while before the gym actually pays the trainer out for it. Only
+    // meaningful once the plan is fully used (classesUsed >= classesTotal);
+    // see server/services/ptEarnings.service.js for how this is surfaced
+    // as a reminder to trainers and owner/manager.
+    trainerPayout: {
+      paid:     { type: Boolean, default: false },
+      paidAt:   { type: Date },
+      paidBy:   { type: Schema.Types.ObjectId, ref: 'User' },
+    },
   },
   { timestamps: true }
 )
 
 memberPTPlanSchema.virtual('classesRemaining').get(function () {
   return Math.max(this.classesTotal - this.classesUsed, 0)
+})
+
+// Trainer's 50% commission for this plan overall, and per completed class —
+// the two figures the whole earnings feature is built from.
+memberPTPlanSchema.virtual('trainerEarning').get(function () {
+  return this.fee / 2
+})
+memberPTPlanSchema.virtual('perClassEarning').get(function () {
+  return this.classesTotal > 0 ? (this.fee / 2) / this.classesTotal : 0
+})
+memberPTPlanSchema.virtual('trainerEarnedSoFar').get(function () {
+  return this.classesUsed * this.perClassEarning
 })
 
 memberPTPlanSchema.set('toJSON', { virtuals: true })

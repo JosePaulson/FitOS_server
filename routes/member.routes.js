@@ -56,8 +56,8 @@ async function fireEnrolmentEmails({ member, invoice, plan, gymId, isRenewal = f
 
   if (!member.email) return   // no email address — skip email sends only
 
-  // Resolve gym's own sender address (falls back to platform email if not set)
-  const { from, replyTo, gymName } = await resolveGymSender(gymId)
+  // Resolve gym's own sender address + branding (falls back to platform defaults if not set)
+  const { from, replyTo, gymName, logo, emailSignature, emailFooterText, welcomeEmailBody, invoiceEmailBody } = await resolveGymSender(gymId)
 
   const expiryDate = member.membershipExpiryDate?.toLocaleDateString('en-IN', {
     day: 'numeric', month: 'long', year: 'numeric',
@@ -66,7 +66,7 @@ async function fireEnrolmentEmails({ member, invoice, plan, gymId, isRenewal = f
   if (!isRenewal) {
     // Welcome email — only on first enrolment
     sendWelcomeEmail({
-      to: member.email, from, replyTo,
+      to: member.email, from, replyTo, logo, emailSignature, emailFooterText, welcomeEmailBody,
       memberName: member.name,
       gymName, planName: plan.name, expiryDate,
     }).catch((e) => console.error('[email] Welcome email failed:', e.message))
@@ -74,7 +74,7 @@ async function fireEnrolmentEmails({ member, invoice, plan, gymId, isRenewal = f
 
   // Invoice / receipt email — on both enrolment and renewal
   sendInvoiceEmail({
-    to: member.email, from, replyTo,
+    to: member.email, from, replyTo, logo, emailSignature, emailFooterText, invoiceEmailBody,
     memberName: member.name,
     gymName,
     invoiceNumber: invoice.invoiceNumber,

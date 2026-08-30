@@ -41,6 +41,11 @@ router.patch('/settings',
         if (!emailRegex.test(val)) throw new Error('Invalid reply-to email address')
         return true
       }),
+    body('settings.emailSignature').optional({ nullable: true }).isLength({ max: 500 }).withMessage('Signature is too long'),
+    body('settings.emailFooterText').optional({ nullable: true }).isLength({ max: 500 }).withMessage('Footer text is too long'),
+    body('settings.welcomeEmailBody').optional({ nullable: true }).isLength({ max: 1000 }).withMessage('Welcome message is too long'),
+    body('settings.invoiceEmailBody').optional({ nullable: true }).isLength({ max: 1000 }).withMessage('Invoice message is too long'),
+    body('settings.renewalEmailBody').optional({ nullable: true }).isLength({ max: 1000 }).withMessage('Renewal message is too long'),
     body('location.lat').optional({ nullable: true }).isFloat({ min: -90, max: 90 }).withMessage('Invalid latitude'),
     body('location.lng').optional({ nullable: true }).isFloat({ min: -180, max: 180 }).withMessage('Invalid longitude'),
     body('location.radiusMeters').optional({ nullable: true }).isInt({ min: 10, max: 1000 }).withMessage('Radius must be between 10 and 1000 meters'),
@@ -50,8 +55,8 @@ router.patch('/settings',
     if (!errors.isEmpty()) return res.status(400).json({ message: errors.array()[0].msg })
 
     try {
-      const ALLOWED_TOP = ['name', 'phone', 'address', 'city', 'state']
-      const ALLOWED_SETTINGS = ['currency', 'timezone', 'brandColor', 'emailFrom', 'replyTo']
+      const ALLOWED_TOP = ['name', 'phone', 'address', 'city', 'state', 'logo']
+      const ALLOWED_SETTINGS = ['currency', 'timezone', 'brandColor', 'emailFrom', 'replyTo', 'emailSignature', 'emailFooterText', 'welcomeEmailBody', 'invoiceEmailBody', 'renewalEmailBody']
       const ALLOWED_LOCATION = ['lat', 'lng', 'radiusMeters']
       const ALLOWED_DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
 

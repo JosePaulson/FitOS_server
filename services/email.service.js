@@ -363,19 +363,73 @@ export async function sendEmail({ to, subject, html, text, from, replyTo }) {
   }
 }
 
+/**
+ * Shared header/footer chrome for gym-branded emails — a logo image if
+ * the gym's set one (falling back to their name as text), and a footer
+ * that's the gym's own custom signature/footer text if they've set it,
+ * or the FitOS default otherwise.
+ */
+function emailHeaderHtml(gymName, logo) {
+  return logo
+    ? `<div style="background:#0D0D0D;padding:24px 32px;border-radius:12px 12px 0 0;text-align:center"><img src="${logo}" alt="${gymName}" style="max-height:40px;max-width:220px" /></div>`
+    : `<div style="background:#0D0D0D;padding:28px 32px;border-radius:12px 12px 0 0"><span style="font-size:20px;font-weight:900;color:#F5F4EF">${gymName}</span></div>`
+}
+function emailFooterHtml(gymName, emailSignature, emailFooterText) {
+  const signatureHtml = emailSignature
+    ? `<p style="color:#555;font-size:13px;margin:24px 0 0;white-space:pre-line">${emailSignature}</p>`
+    : ''
+  const footerLine = emailFooterText || `Sent by ${gymName} · Powered by FitOS`
+  return `${signatureHtml}<p style="color:#aaa;font-size:11px;margin-top:16px;border-top:1px solid #e0e0e0;padding-top:16px;white-space:pre-line">${footerLine}</p>`
+}
+
+/**
+ * Escapes a gym owner's free-text template body before it goes into HTML
+ * email markup — this is user-controlled input from a settings textarea,
+ * so it gets the same treatment as any other untrusted string rendered
+ * into HTML (never trust it not to contain '<', '&', etc., whether by
+ * accident or a compromised account trying to inject markup/tracking
+ * pixels into member-facing emails).
+ */
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+/**
+ * Renders a gym's custom email body text: escapes it (safety), swaps in
+ * {{variable}} placeholders, and turns line breaks into <br/> — falls
+ * back to the given default template when the gym hasn't customized this
+ * message, so nothing breaks for a gym that's never touched this setting.
+ */
+function renderEmailBody(customTemplate, vars, fallbackHtml) {
+  if (!customTemplate?.trim()) return fallbackHtml
+  const escaped = escapeHtml(customTemplate).replace(/\n/g, '<br/>')
+  const filled = escaped.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, key) => (
+    key in vars ? escapeHtml(String(vars[key])) : `{{${key}}}`
+  ))
+  return `<p style="color:#555;margin:0 0 24px;white-space:pre-line">${filled}</p>`
+}
+
 // ── Welcome email ─────────────────────────────────────────────────────────
-export async function sendWelcomeEmail({ to, gymName, memberName, planName, expiryDate, from, replyTo }) {
+export async function sendWelcomeEmail({ to, gymName, memberName, planName, expiryDate, from, replyTo, logo, emailSignature, emailFooterText, welcomeEmailBody }) {
+  const bodyHtml = renderEmailBody(
+    welcomeEmailBody,
+    { memberName, gymName, planName, expiryDate },
+    `<h2 style="margin:0 0 8px">Welcome, ${memberName}! 🎉</h2>
+     <p style="color:#555;margin:0 0 24px">You've been successfully enrolled at <strong>${gymName}</strong>.</p>`
+  )
   await sendEmail({
     to, from, replyTo,
     subject: `Welcome to ${gymName}! 🎉`,
     html: `
       <div style="font-family:sans-serif;max-width:520px;margin:0 auto;color:#1a1a1a">
-        <div style="background:#0D0D0D;padding:28px 32px;border-radius:12px 12px 0 0">
-          <span style="font-size:20px;font-weight:900;color:#F5F4EF">${gymName}</span>
-        </div>
+        ${emailHeaderHtml(gymName, logo)}
         <div style="background:#f9f9f9;padding:32px;border-radius:0 0 12px 12px">
-          <h2 style="margin:0 0 8px">Welcome, ${memberName}! 🎉</h2>
-          <p style="color:#555;margin:0 0 24px">You've been successfully enrolled at <strong>${gymName}</strong>.</p>
+          ${bodyHtml}
           <table style="width:100%;border-collapse:collapse;margin-bottom:24px">
             <tr style="background:#f0f0f0">
               <td style="padding:10px 14px;font-size:13px;color:#555">Plan</td>
@@ -387,9 +441,7 @@ export async function sendWelcomeEmail({ to, gymName, memberName, planName, expi
             </tr>
           </table>
           <p style="color:#555;font-size:13px">See you at the gym! 💪</p>
-          <p style="color:#aaa;font-size:11px;margin-top:32px;border-top:1px solid #e0e0e0;padding-top:16px">
-            Sent by ${gymName} · Powered by FitOS
-          </p>
+          ${emailFooterHtml(gymName, emailSignature, emailFooterText)}
         </div>
       </div>
     `,
@@ -402,20 +454,25 @@ export async function sendInvoiceEmail({
   invoiceNumber, planName,
   baseAmount, taxRate, taxAmount, totalAmount,
   paymentMethod, pdfUrl,
-  from, replyTo,
+  from, replyTo, logo, emailSignature, emailFooterText, invoiceEmailBody,
 }) {
+  const bodyHtml = renderEmailBody(
+    invoiceEmailBody,
+    { memberName, gymName, invoiceNumber, planName, totalAmount },
+    `<h2 style="margin:0 0 4px">Payment received ✅</h2>
+     <p style="color:#555;margin:0 0 24px;font-size:14px">Hi ${memberName}, here's your receipt from <strong>${gymName}</strong>.</p>`
+  )
   await sendEmail({
     to, from, replyTo,
     subject: `Receipt: Invoice ${invoiceNumber} from ${gymName}`,
     html: `
       <div style="font-family:sans-serif;max-width:520px;margin:0 auto;color:#1a1a1a">
         <div style="background:#0D0D0D;padding:28px 32px;border-radius:12px 12px 0 0;display:flex;justify-content:space-between;align-items:center">
-          <span style="font-size:20px;font-weight:900;color:#F5F4EF">${gymName}</span>
+          ${logo ? `<img src="${logo}" alt="${gymName}" style="max-height:36px;max-width:200px" />` : `<span style="font-size:20px;font-weight:900;color:#F5F4EF">${gymName}</span>`}
           <span style="color:#888;font-size:12px;letter-spacing:0.1em">RECEIPT</span>
         </div>
         <div style="background:#f9f9f9;padding:32px;border-radius:0 0 12px 12px">
-          <h2 style="margin:0 0 4px">Payment received ✅</h2>
-          <p style="color:#555;margin:0 0 24px;font-size:14px">Hi ${memberName}, here's your receipt from <strong>${gymName}</strong>.</p>
+          ${bodyHtml}
           <table style="width:100%;border-collapse:collapse;margin-bottom:8px">
             <tr style="background:#f0f0f0">
               <td style="padding:10px 14px;font-size:13px;color:#555">Invoice number</td>
@@ -446,10 +503,8 @@ export async function sendInvoiceEmail({
             </tr>
           </table>
           ${pdfUrl ? `<a href="${pdfUrl}" style="display:inline-block;background:#C8F135;color:#0D0D0D;font-weight:700;padding:10px 20px;border-radius:8px;text-decoration:none;font-size:14px;margin-bottom:24px">Download PDF invoice</a>` : ''}
-          <p style="color:#aaa;font-size:11px;margin-top:24px;border-top:1px solid #e0e0e0;padding-top:16px">
-            This receipt was sent by <strong>${gymName}</strong> · Powered by FitOS<br/>
-            For questions, reply to this email or contact your gym directly.
-          </p>
+          ${emailFooterHtml(gymName, emailSignature, emailFooterText)}
+          <p style="color:#aaa;font-size:11px;margin-top:8px">For questions, reply to this email or contact your gym directly.</p>
         </div>
       </div>
     `,
@@ -457,22 +512,23 @@ export async function sendInvoiceEmail({
 }
 
 // ── Renewal reminder ──────────────────────────────────────────────────────
-export async function sendRenewalReminder({ to, memberName, gymName, expiryDate, daysLeft, from, replyTo }) {
+export async function sendRenewalReminder({ to, memberName, gymName, expiryDate, daysLeft, from, replyTo, logo, emailSignature, emailFooterText, renewalEmailBody }) {
+  const bodyHtml = renderEmailBody(
+    renewalEmailBody,
+    { memberName, gymName, expiryDate, daysLeft },
+    `<h2 style="margin:0 0 8px">⏰ Membership expiring soon</h2>
+     <p style="color:#555;margin:0 0 16px">Hey ${memberName}, your membership at <strong>${gymName}</strong> expires on <strong>${expiryDate}</strong> — that's ${daysLeft} day${daysLeft === 1 ? '' : 's'} away.</p>
+     <p style="color:#555;margin:0 0 24px">Contact your gym to renew and keep your progress going! 💪</p>`
+  )
   await sendEmail({
     to, from, replyTo,
     subject: `Your ${gymName} membership expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'}`,
     html: `
       <div style="font-family:sans-serif;max-width:520px;margin:0 auto;color:#1a1a1a">
-        <div style="background:#0D0D0D;padding:28px 32px;border-radius:12px 12px 0 0">
-          <span style="font-size:20px;font-weight:900;color:#F5F4EF">${gymName}</span>
-        </div>
+        ${emailHeaderHtml(gymName, logo)}
         <div style="background:#f9f9f9;padding:32px;border-radius:0 0 12px 12px">
-          <h2 style="margin:0 0 8px">⏰ Membership expiring soon</h2>
-          <p style="color:#555;margin:0 0 16px">Hey ${memberName}, your membership at <strong>${gymName}</strong> expires on <strong>${expiryDate}</strong> — that's ${daysLeft} day${daysLeft === 1 ? '' : 's'} away.</p>
-          <p style="color:#555;margin:0 0 24px">Contact your gym to renew and keep your progress going! 💪</p>
-          <p style="color:#aaa;font-size:11px;border-top:1px solid #e0e0e0;padding-top:16px">
-            Sent by ${gymName} · Powered by FitOS
-          </p>
+          ${bodyHtml}
+          ${emailFooterHtml(gymName, emailSignature, emailFooterText)}
         </div>
       </div>
     `,

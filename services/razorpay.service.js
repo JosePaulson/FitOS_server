@@ -2,6 +2,7 @@ import crypto from 'crypto'
 import Razorpay from 'razorpay'
 import Gym from '../models/Gym.js'
 import Invoice from '../models/Invoice.js'
+import SubscriptionPlan from '../models/SubscriptionPlan.js'
 import { fulfillInvoicePayment } from './paymentFulfillment.service.js'
 
 let _razorpay
@@ -35,7 +36,14 @@ export const RAZORPAY_PLAN_IDS = {
 }
 
 export async function createSubscription(plan, interval = 'monthly', gymId) {
-  const planId = RAZORPAY_PLAN_IDS[`${plan}_${interval}`]
+  // A super-admin-configured plan in the database takes precedence over
+  // the env-var-configured plan ID for this tier, so pointing a tier at a
+  // real Razorpay plan doesn't require a deploy (see SubscriptionPlan
+  // model + saasAdmin.routes.js).
+  const dbPlan = await SubscriptionPlan.findOne({ key: plan, isActive: true }).select('razorpayPlanIdMonthly razorpayPlanIdYearly')
+  const dbPlanId = dbPlan && (interval === 'yearly' ? dbPlan.razorpayPlanIdYearly : dbPlan.razorpayPlanIdMonthly)
+
+  const planId = dbPlanId || RAZORPAY_PLAN_IDS[`${plan}_${interval}`]
   if (!planId) throw new Error(`No Razorpay plan ID configured for ${plan}_${interval}`)
 
   return getRazorpay().subscriptions.create({

@@ -30,11 +30,11 @@ export function startRenewalReminderJob() {
 
         const expiryDate = member.membershipExpiryDate.toLocaleDateString('en-IN')
 
-        // Resolve gym's own sender address for the reminder email
-        const { from, replyTo, gymName } = await resolveGymSender(member.gymId)
+        // Resolve gym's own sender address + branding for the reminder email
+        const { from, replyTo, gymName, logo, emailSignature, emailFooterText, renewalEmailBody } = await resolveGymSender(member.gymId)
 
         if (member.email) {
-          sendRenewalReminder({ to: member.email, from, replyTo, memberName: member.name, gymName, expiryDate, daysLeft: days })
+          sendRenewalReminder({ to: member.email, from, replyTo, logo, emailSignature, emailFooterText, renewalEmailBody, memberName: member.name, gymName, expiryDate, daysLeft: days })
             .catch((e) => console.error('[cron:renewal] Email error:', e.message))
         }
         if (member.phone) {

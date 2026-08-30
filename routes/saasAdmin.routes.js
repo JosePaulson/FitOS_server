@@ -2,7 +2,9 @@ import { Router } from 'express'
 import Gym    from '../models/Gym.js'
 import Member from '../models/Member.js'
 import Lead   from '../models/Lead.js'
+import SubscriptionPlan from '../models/SubscriptionPlan.js'
 import { protect } from '../middleware/auth.js'
+import { invalidatePlanConfigCache, PLAN_FEATURES } from '../middleware/planGate.js'
 
 const router = Router()
 
@@ -88,6 +90,73 @@ router.get('/leads', protect, saasAdminOnly, async (req, res, next) => {
       Lead.countDocuments(filter),
     ])
     res.json({ leads, total })
+  } catch (err) { next(err) }
+})
+
+// ── Subscription plans (feature-gate tiers + Razorpay pricing) ─────────────
+
+// Seeds the built-in lite/basic/pro defaults into the database on first
+// visit to the management page, so the super-admin starts with real,
+// editable rows instead of an empty list. A no-op once anything exists.
+async function seedDefaultPlansIfEmpty() {
+  const count = await SubscriptionPlan.countDocuments()
+  if (count > 0) return
+  const defaults = Object.entries(PLAN_FEATURES).map(([key, features], i) => ({
+    key, name: key.charAt(0).toUpperCase() + key.slice(1), features, sortOrder: i,
+  }))
+  await SubscriptionPlan.insertMany(defaults)
+}
+
+router.get('/plans', protect, saasAdminOnly, async (req, res, next) => {
+  try {
+    await seedDefaultPlansIfEmpty()
+    const plans = await SubscriptionPlan.find().sort({ sortOrder: 1 })
+    res.json(plans)
+  } catch (err) { next(err) }
+})
+
+router.post('/plans', protect, saasAdminOnly, async (req, res, next) => {
+  try {
+    const { key, name } = req.body
+    if (!key || !name) return res.status(400).json({ message: 'key and name are required' })
+
+    const allowed = ['key', 'name', 'description', 'priceMonthly', 'priceYearly', 'razorpayPlanIdMonthly', 'razorpayPlanIdYearly', 'memberLimit', 'features', 'isActive', 'sortOrder']
+    const data = {}
+    allowed.forEach((k) => { if (req.body[k] !== undefined) data[k] = req.body[k] })
+
+    const plan = await SubscriptionPlan.create(data)
+    invalidatePlanConfigCache()
+    res.status(201).json(plan)
+  } catch (err) {
+    if (err.code === 11000) return res.status(409).json({ message: `A plan with key '${req.body.key}' already exists` })
+    next(err)
+  }
+})
+
+router.patch('/plans/:id', protect, saasAdminOnly, async (req, res, next) => {
+  try {
+    const allowed = ['name', 'description', 'priceMonthly', 'priceYearly', 'razorpayPlanIdMonthly', 'razorpayPlanIdYearly', 'memberLimit', 'features', 'isActive', 'sortOrder']
+    const updates = {}
+    allowed.forEach((k) => { if (req.body[k] !== undefined) updates[k] = req.body[k] })
+
+    const plan = await SubscriptionPlan.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true })
+    if (!plan) return res.status(404).json({ message: 'Plan not found' })
+    invalidatePlanConfigCache()
+    res.json(plan)
+  } catch (err) { next(err) }
+})
+
+// Deactivates rather than deletes — a gym could still be on this tier
+// (gym.plan is just a string, not a hard reference), so removing the row
+// entirely could leave planGate.js unable to find a matching tier at all.
+// Deactivating keeps the row (and its features/index) around while
+// hiding it from anywhere a super-admin would offer it going forward.
+router.delete('/plans/:id', protect, saasAdminOnly, async (req, res, next) => {
+  try {
+    const plan = await SubscriptionPlan.findByIdAndUpdate(req.params.id, { isActive: false }, { new: true })
+    if (!plan) return res.status(404).json({ message: 'Plan not found' })
+    invalidatePlanConfigCache()
+    res.json({ message: 'Plan deactivated', plan })
   } catch (err) { next(err) }
 })
 

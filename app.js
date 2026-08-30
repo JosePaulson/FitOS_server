@@ -23,6 +23,7 @@ import trainerAvailabilityRoutes from './routes/trainerAvailability.routes.js'
 import invoiceRoutes from './routes/invoice.routes.js'
 import attendanceRoutes from './routes/attendance.routes.js'
 import dashboardRoutes from './routes/dashboard.routes.js'
+import analyticsRoutes from './routes/analytics.routes.js'
 import workoutRoutes from './routes/workout.routes.js'
 import staffRoutes from './routes/staff.routes.js'
 import staffPayrollRoutes from './routes/staffPayroll.routes.js'
@@ -58,6 +59,7 @@ import timetableRoutes from './routes/timetable.routes.js'
 import ptEarningsRoutes from './routes/ptEarnings.routes.js'
 import memberPortalTimetableRoutes from './routes/memberPortal.timetable.routes.js'
 import memberPortalTransformationRoutes from './routes/memberPortal.transformation.routes.js'
+import memberPortalMealLogRoutes from './routes/memberPortal.mealLog.routes.js'
 
 // ── Connect DB ────────────────────────────────────────────────────────────
 await connectDB()
@@ -131,6 +133,7 @@ app.use('/api/trainer-availability', trainerAvailabilityRoutes)
 app.use('/api/invoices', invoiceRoutes)
 app.use('/api/attendance', attendanceRoutes)
 app.use('/api/dashboard', dashboardRoutes)
+app.use('/api/analytics', analyticsRoutes)
 app.use('/api/workout-plans', workoutRoutes)
 app.use('/api/staff', staffRoutes)
 app.use('/api/staff-payroll', staffPayrollRoutes)
@@ -152,6 +155,7 @@ app.use('/api/member-portal/complaints', memberPortalComplaintRoutes)
 app.use('/api/member-portal/staff-ratings', memberPortalStaffRatingRoutes)
 app.use('/api/member-portal/timetable', memberPortalTimetableRoutes)
 app.use('/api/member-portal/transformation', memberPortalTransformationRoutes)
+app.use('/api/member-portal/meal-log', memberPortalMealLogRoutes)
 app.use('/api/member-portal', memberPortalRoutes)
 app.use('/api/pt-sessions', ptSessionRoutes)
 app.use('/api/workout-logs', workoutLogRoutes)

@@ -59,6 +59,18 @@ const gymSchema = new Schema(
       brandColor: { type: String, default: '#C8F135' },
       emailFrom:  { type: String, default: '' },
       replyTo:    { type: String, default: '' },
+      // Customizable branding applied to outgoing transactional emails
+      // (welcome, birthday greetings, etc.) — kept as reusable
+      // signature/footer blocks rather than per-template bodies, so a
+      // gym sets its voice once and it's consistent everywhere.
+      emailSignature: { type: String, default: '', maxlength: 500 },
+      emailFooterText: { type: String, default: '', maxlength: 500 },
+      // Per-template custom message bodies — {{variable}} placeholders,
+      // filled in and HTML-escaped at send time (see renderEmailBody in
+      // email.service.js). Empty = use the built-in default copy.
+      welcomeEmailBody: { type: String, default: '', maxlength: 1000 },
+      invoiceEmailBody: { type: String, default: '', maxlength: 1000 },
+      renewalEmailBody: { type: String, default: '', maxlength: 1000 },
     },
 
     isActive: { type: Boolean, default: true },

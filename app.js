@@ -11,6 +11,7 @@ import errorHandler from './middleware/errorHandler.js'
 import { startRenewalReminderJob } from './jobs/renewalReminders.js'
 import { startBirthdayJob } from './jobs/birthdayGreetings.js'
 import { startPTPlanReminderJob } from './jobs/ptPlanReminders.js'
+import { startHydrationRemindersJob } from './jobs/hydrationReminders.js'
 
 // ── Routes ────────────────────────────────────────────────────────────────
 import authRoutes from './routes/auth.routes.js'
@@ -60,6 +61,7 @@ import ptEarningsRoutes from './routes/ptEarnings.routes.js'
 import memberPortalTimetableRoutes from './routes/memberPortal.timetable.routes.js'
 import memberPortalTransformationRoutes from './routes/memberPortal.transformation.routes.js'
 import memberPortalMealLogRoutes from './routes/memberPortal.mealLog.routes.js'
+import memberPortalHydrationRoutes from './routes/memberPortal.hydration.routes.js'
 
 // ── Connect DB ────────────────────────────────────────────────────────────
 await connectDB()
@@ -156,6 +158,7 @@ app.use('/api/member-portal/staff-ratings', memberPortalStaffRatingRoutes)
 app.use('/api/member-portal/timetable', memberPortalTimetableRoutes)
 app.use('/api/member-portal/transformation', memberPortalTransformationRoutes)
 app.use('/api/member-portal/meal-log', memberPortalMealLogRoutes)
+app.use('/api/member-portal/hydration', memberPortalHydrationRoutes)
 app.use('/api/member-portal', memberPortalRoutes)
 app.use('/api/pt-sessions', ptSessionRoutes)
 app.use('/api/workout-logs', workoutLogRoutes)
@@ -204,6 +207,7 @@ if (process.env.NODE_ENV !== 'test') {
   startRenewalReminderJob()
   startBirthdayJob()
   startPTPlanReminderJob()
+  startHydrationRemindersJob()
 }
 
 // ── Start server ──────────────────────────────────────────────────────────

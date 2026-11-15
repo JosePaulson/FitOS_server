@@ -3,6 +3,8 @@ import { body, validationResult } from 'express-validator'
 import Member from '../models/Member.js'
 import MembershipPlan from '../models/MembershipPlan.js'
 import Invoice from '../models/Invoice.js'
+import MemberAuth from '../models/MemberAuth.js'
+import bcrypt from 'bcryptjs'
 import { protect, authorize } from '../middleware/auth.js'
 import { extractTax } from '../utils/tax.js'
 import { sendWelcomeEmail, sendInvoiceEmail } from '../services/email.service.js'
@@ -86,6 +88,45 @@ async function fireEnrolmentEmails({ member, invoice, plan, gymId, isRenewal = f
   }).catch((e) => console.error('[email] Invoice email failed:', e.message))
 }
 
+/**
+ * Give a newly-created member a starting member-portal PIN: the last 4 digits
+ * of the phone number entered at enrolment. Staff can still override it via
+ * the existing "Set PIN" flow, and members can change it themselves from
+ * Profile — this only provides a sensible default so they can log in straight
+ * away.
+ *
+ * Never throws: failing to create the PIN must not roll back or fail an
+ * otherwise-successful enrolment (staff can still use "Set PIN" afterwards).
+ * Skipped when the phone has fewer than 4 digits, or when a MemberAuth
+ * record already exists for this member / phone (never overwrites a PIN).
+ */
+async function createDefaultMemberPin(member) {
+  try {
+    const digits = String(member.phone || '').replace(/\D/g, '')
+    if (digits.length < 4) return false
+    const pin = digits.slice(-4)
+
+    const exists = await MemberAuth.exists({
+      gymId: member.gymId,
+      $or: [{ memberId: member._id }, { phone: member.phone }],
+    })
+    if (exists) return false
+
+    await MemberAuth.create({
+      gymId: member.gymId,
+      memberId: member._id,
+      phone: member.phone,
+      email: member.email,
+      pinHash: await bcrypt.hash(pin, 10),
+      isActive: true,
+    })
+    return true
+  } catch (e) {
+    console.error('[member] Default PIN creation failed:', e.message)
+    return false
+  }
+}
+
 // GET /api/members
 router.get('/', protect, async (req, res, next) => {
   try {
@@ -157,6 +198,9 @@ router.post('/',
       })
 
       const invoice = await Invoice.create(buildInvoicePayload(req.gymId, member._id, plan, startDate))
+
+      // Default member-portal PIN = last 4 digits of the phone number.
+      await createDefaultMemberPin(member)
 
       res.status(201).json({ member, invoice })
     } catch (err) { next(err) }

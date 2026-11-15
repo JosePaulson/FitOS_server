@@ -5,6 +5,7 @@ import MemberAuth from '../models/MemberAuth.js'
 import Member from '../models/Member.js'
 import Gym from '../models/Gym.js'
 import { memberProtect } from '../middleware/memberAuth.js'
+import { protect, authorize } from '../middleware/auth.js'
 import {
   generateRegistrationOptions, verifyRegistrationResponse,
   generateAuthenticationOptions, verifyAuthenticationResponse,
@@ -152,14 +153,19 @@ router.get('/me', memberProtect, async (req, res, next) => {
  * Staff sets a member's PIN (or member changes their own PIN after login).
  */
 router.post('/set-pin',
+  protect,
+  authorize('owner', 'manager', 'receptionist'),
   [
     body('memberId').notEmpty().withMessage('memberId required'),
-    body('gymId').notEmpty().withMessage('gymId required'),
     body('pin').isLength({ min: 4, max: 6 }).withMessage('PIN must be 4–6 digits'),
   ],
   async (req, res, next) => {
+    if (!validate(req, res)) return
     try {
-      const { memberId, gymId, pin } = req.body
+      const { memberId, pin } = req.body
+      // Always the authenticated staff member's own gym — never trust a
+      // gymId from the request body.
+      const gymId = req.gymId
       const member = await Member.findOne({ _id: memberId, gymId })
       if (!member) return res.status(404).json({ message: 'Member not found' })
 

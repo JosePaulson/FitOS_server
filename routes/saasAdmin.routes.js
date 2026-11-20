@@ -5,12 +5,13 @@ import Lead   from '../models/Lead.js'
 import SubscriptionPlan from '../models/SubscriptionPlan.js'
 import { protect } from '../middleware/auth.js'
 import { invalidatePlanConfigCache, PLAN_FEATURES } from '../middleware/planGate.js'
+import { devOr } from '../utils/errors.js'
 
 const router = Router()
 
 function saasAdminOnly(req, res, next) {
   const adminGymId = process.env.SAAS_ADMIN_GYM_ID
-  if (!adminGymId) return res.status(503).json({ message: 'SaaS admin panel not configured (set SAAS_ADMIN_GYM_ID)' })
+  if (!adminGymId) return res.status(503).json({ message: devOr('SaaS admin panel not configured (set SAAS_ADMIN_GYM_ID)', 'This area isn\u2019t available.') })
   if (req.user.role !== 'owner' || req.user.gymId.toString() !== adminGymId) {
     return res.status(403).json({ message: 'SaaS admin access denied' })
   }

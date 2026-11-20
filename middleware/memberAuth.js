@@ -9,7 +9,7 @@ import MemberAuth from '../models/MemberAuth.js'
 export async function memberProtect(req, res, next) {
   const header = req.headers.authorization
   if (!header?.startsWith('Bearer ')) {
-    return res.status(401).json({ message: 'No token provided' })
+    return res.status(401).json({ message: 'Please sign in to continue.' })
   }
 
   const token = header.split(' ')[1]
@@ -28,6 +28,6 @@ export async function memberProtect(req, res, next) {
     req.gymId      = auth.gymId
     next()
   } catch {
-    return res.status(401).json({ message: 'Invalid or expired token' })
+    return res.status(401).json({ message: 'Your session has expired. Please sign in again.' })
   }
 }

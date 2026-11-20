@@ -6,8 +6,11 @@ import { body, validationResult } from 'express-validator'
 import Gym  from '../models/Gym.js'
 import User from '../models/User.js'
 import { protect } from '../middleware/auth.js'
+import { getEffectivePermissions } from '../services/permissions.service.js'
 import { seedPrebuiltPlansForGym } from '../utils/seedPrebuiltPlans.js'
 import { sendEmail } from '../services/email.service.js'
+import { registrationConflicts } from '../services/registrationChecks.service.js'
+import { normalizeSubdomain } from '../utils/identity.js'
 
 const router = Router()
 
@@ -24,29 +27,39 @@ function validate(req, res) {
 router.post('/register',
   [
     body('gymName').notEmpty().withMessage('Gym name is required'),
-    body('subdomain').notEmpty().matches(/^[a-z0-9-]+$/).withMessage('Subdomain: lowercase letters, numbers, hyphens only'),
+    body('subdomain').trim().toLowerCase().notEmpty().withMessage('A web address is required'),
     body('name').notEmpty().withMessage('Your name is required'),
-    body('email').isEmail().withMessage('Valid email required'),
+    body('email').trim().isEmail().withMessage('Enter a valid email address'),
     body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
   ],
   async (req, res, next) => {
     if (!validate(req, res)) return
     try {
-      const { gymName, subdomain, name, email, password } = req.body
+      const { gymName, name, email, password } = req.body
+      const subdomain = normalizeSubdomain(req.body.subdomain)
 
-      if (await Gym.findOne({ subdomain })) {
-        return res.status(409).json({ message: 'Subdomain already taken' })
+      // Strictly one gym per email and per web address. Everything is checked up front and every
+      // problem is reported together, per field, so the form can point at each one.
+      const { fields, status } = await registrationConflicts({ email, subdomain })
+      if (Object.keys(fields).length) {
+        return res.status(status).json({ message: Object.values(fields).join(' '), fields })
       }
 
-      const gym = await Gym.create({
-        name: gymName, subdomain,
-        plan: 'lite', planStatus: 'trialing',
-        trialEndsAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      })
-
-      const user = await User.create({ gymId: gym._id, name, email, passwordHash: password, role: 'owner' })
-      gym.ownerUserId = user._id
-      await gym.save()
+      let gym, user
+      try {
+        gym = await Gym.create({
+          name: gymName, subdomain,
+          plan: 'lite', planStatus: 'trialing',
+          trialEndsAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        })
+        user = await User.create({ gymId: gym._id, name, email, passwordHash: password, role: 'owner' })
+        gym.ownerUserId = user._id
+        await gym.save()
+      } catch (createErr) {
+        // Never leave a half-created gym behind (e.g. a simultaneous sign-up won the unique-email race).
+        if (gym?._id) await Gym.deleteOne({ _id: gym._id }).catch(() => {})
+        throw createErr
+      }
 
       // Give the new gym a ready-to-use starter library of workout/diet
       // plans so the dashboard isn't empty on day one. Non-blocking — a
@@ -96,7 +109,10 @@ router.post('/login',
 
       res.json({
         accessToken, refreshToken,
-        user: { id: user._id, name: user.name, email: user.email, role: user.role, gymId: user.gymId },
+        user: {
+          id: user._id, name: user.name, email: user.email, role: user.role, gymId: user.gymId,
+          access: await getEffectivePermissions(user.gymId, user.role), // what this role may do (owner-configurable)
+        },
         gym,
       })
     } catch (err) { next(err) }
@@ -106,13 +122,13 @@ router.post('/login',
 // POST /api/auth/refresh
 router.post('/refresh', async (req, res, next) => {
   const { refreshToken } = req.body
-  if (!refreshToken) return res.status(401).json({ message: 'Refresh token required' })
+  if (!refreshToken) return res.status(401).json({ message: 'Your session has expired. Please sign in again.' })
   try {
     const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET)
     const user    = await User.findById(decoded.id).select('+refreshToken')
 
     if (!user || user.refreshToken !== refreshToken) {
-      return res.status(401).json({ message: 'Invalid refresh token' })
+      return res.status(401).json({ message: 'Your session has expired. Please sign in again.' })
     }
 
     const newAccess  = signAccess(user._id)
@@ -229,7 +245,9 @@ router.post('/reset-password/:token',
 // GET /api/auth/me
 router.get('/me', protect, async (req, res) => {
   const gym = await Gym.findById(req.gymId).select('name subdomain plan planStatus trialEndsAt')
-  res.json({ user: req.user, gym })
+  const access = await getEffectivePermissions(req.gymId, req.user.role)
+  const user = typeof req.user.toObject === 'function' ? req.user.toObject() : req.user
+  res.json({ user: { ...user, access }, gym })
 })
 
 export default router

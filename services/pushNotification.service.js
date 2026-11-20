@@ -1,5 +1,7 @@
 import webpush from '../config/webpush.js'
 import PushSubscription from '../models/PushSubscription.js'
+import Member from '../models/Member.js'
+import Notification from '../models/Notification.js'
 
 /**
  * Sends a push notification to every device a member has subscribed on.
@@ -16,14 +18,45 @@ import PushSubscription from '../models/PushSubscription.js'
  * @param {string} [payload.url]   deep link opened when the notification is tapped
  * @param {string} [payload.tag]   groups/replaces notifications of the same kind
  */
+// Chatty, low-value reminders that would only bury real notifications in the inbox.
+const NO_INBOX_TAG = /^hydration/
+
+/** Saves the notification to the member's in-app inbox. Never throws. */
+async function recordInbox(memberId, payload) {
+  try {
+    if (payload.inbox === false || NO_INBOX_TAG.test(payload.tag || '')) return
+    const id = memberId?._id || memberId
+    const member = await Member.findById(id).select('gymId')
+    if (!member) return
+    await Notification.create({
+      gymId: member.gymId, memberId: id,
+      title: String(payload.title || '').slice(0, 120), body: String(payload.body || '').slice(0, 600),
+      url: payload.url || '/', tag: payload.tag, type: payload.type || 'general',
+    })
+  } catch (err) {
+    console.error('[inbox] failed to record notification:', err.message)
+  }
+}
+
+/**
+ * Notify a member: always saved to their in-app inbox, and pushed to their
+ * devices if push is set up. (Use pushToDevices alone when the inbox rows are
+ * created separately, e.g. announcements.)
+ */
 export async function sendPushToMember(memberId, payload) {
+  await recordInbox(memberId, payload)
+  return pushToDevices(memberId, payload)
+}
+
+/** Push only — no inbox row. */
+export async function pushToDevices(memberId, payload) {
   if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
     // Push isn't configured — silently no-op rather than spamming logs on
     // every single triggering action in an environment that hasn't set it up.
     return
   }
 
-  const subscriptions = await PushSubscription.find({ memberId })
+  const subscriptions = await PushSubscription.find({ memberId: memberId?._id || memberId })
   if (subscriptions.length === 0) return
 
   const body = JSON.stringify({

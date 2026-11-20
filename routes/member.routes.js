@@ -6,11 +6,18 @@ import Invoice from '../models/Invoice.js'
 import MemberAuth from '../models/MemberAuth.js'
 import bcrypt from 'bcryptjs'
 import { protect, authorize } from '../middleware/auth.js'
-import { extractTax } from '../utils/tax.js'
+import { permit } from '../services/permissions.service.js'
+import { priceInvoice } from '../utils/pricing.js'
+import { resolveDiscount, recordRedemption } from '../services/coupon.service.js'
+import { getReferralSettings, findReferrer, generateReferralCode } from '../services/referral.service.js'
+import { freezeMembership, resumeMembership } from '../services/membershipFreeze.service.js'
 import { sendWelcomeEmail, sendInvoiceEmail } from '../services/email.service.js'
 import { resolveGymSender } from '../utils/gymEmailSender.js'
 import { sendPushToMember } from '../services/pushNotification.service.js'
 import { addPlanDuration } from '../utils/planDuration.js'
+import { findActiveMemberByPhone, duplicatePhoneMessage } from '../services/memberIdentity.service.js'
+import { isValidPhone, phoneKey, digitsOf } from '../utils/identity.js'
+import { renewalPeriod, statusForExpiry } from '../utils/membershipDates.js'
 
 const router = Router()
 
@@ -20,14 +27,22 @@ function validate(req, res) {
   return true
 }
 
-/** Build invoice payload — tax extracted from inclusive price */
-function buildInvoicePayload(gymId, memberId, plan, invoiceDate) {
-  const { baseAmount, taxAmount, totalAmount } = extractTax(plan.price, plan.taxRate ?? 18)
+/**
+ * Build invoice payload — tax extracted from the (possibly discounted)
+ * tax-inclusive price. `discount` = { discountAmount, couponId, couponCode }
+ * from resolveDiscount(); omit for no discount.
+ */
+function buildInvoicePayload(gymId, memberId, plan, invoiceDate, discount = {}) {
+  const taxRate = plan.taxRate ?? 18
+  const { listAmount, discountAmount, baseAmount, taxAmount, totalAmount } =
+    priceInvoice(plan.price, taxRate, discount.discountAmount || 0)
   return {
     gymId, memberId,
     planId: plan._id,
+    listAmount, discountAmount,
+    ...(discountAmount > 0 ? { couponId: discount.couponId, couponCode: discount.couponCode } : {}),
     baseAmount,
-    taxRate: plan.taxRate ?? 18,
+    taxRate,
     taxAmount,
     totalAmount,
     status: 'pending',
@@ -106,11 +121,17 @@ async function createDefaultMemberPin(member) {
     if (digits.length < 4) return false
     const pin = digits.slice(-4)
 
-    const exists = await MemberAuth.exists({
+    const existing = await MemberAuth.findOne({
       gymId: member.gymId,
       $or: [{ memberId: member._id }, { phone: member.phone }],
     })
-    if (exists) return false
+    if (existing) {
+      if (String(existing.memberId) === String(member._id)) return false
+      // Same number, different member: only an ARCHIVED member's leftover login may be replaced.
+      const owner = await Member.findById(existing.memberId).select('isActive')
+      if (owner && owner.isActive !== false) return false
+      await MemberAuth.deleteOne({ _id: existing._id })
+    }
 
     await MemberAuth.create({
       gymId: member.gymId,
@@ -160,6 +181,20 @@ router.get('/', protect, async (req, res, next) => {
 })
 
 // GET /api/members/:id
+// GET /api/members/check-phone?phone=...&excludeId=... — live warning while typing in the add/edit form
+router.get('/check-phone', protect, async (req, res, next) => {
+  try {
+    const phone = String(req.query.phone || '')
+    if (digitsOf(phone).length < 7) return res.json({ available: true, incomplete: true }) // still typing
+    if (!isValidPhone(phone)) return res.json({ available: false, valid: false, message: 'Enter a valid phone number (7\u201315 digits).' })
+    const excludeId = /^[a-f0-9]{24}$/.test(String(req.query.excludeId || '')) ? req.query.excludeId : undefined
+    const dup = await findActiveMemberByPhone(req.gymId, phone, excludeId)
+    res.json(dup
+      ? { available: false, valid: true, message: duplicatePhoneMessage(dup), member: { _id: dup._id, name: dup.name } }
+      : { available: true, valid: true })
+  } catch (err) { next(err) }
+})
+
 router.get('/:id', protect, async (req, res, next) => {
   try {
     const member = await Member.findOne({ _id: req.params.id, gymId: req.gymId })
@@ -172,7 +207,7 @@ router.get('/:id', protect, async (req, res, next) => {
 // POST /api/members — enrol new member
 router.post('/',
   protect,
-  authorize('owner', 'manager', 'receptionist'),
+  permit('members.enrol'),
   [
     body('name').notEmpty().withMessage('Name required'),
     body('phone').notEmpty().withMessage('Phone required'),
@@ -181,7 +216,19 @@ router.post('/',
   async (req, res, next) => {
     if (!validate(req, res)) return
     try {
-      const { name, phone, email, dob, age, gender, height, planId, assignedTrainerId, source, emergencyContact, healthNotes, membershipStartDate } = req.body
+      const { name, phone, email, dob, age, gender, height, planId, assignedTrainerId, source, emergencyContact, healthNotes, membershipStartDate, couponCode, referralCode } = req.body
+      // One active member per phone number. Checked before anything is created, with a message
+      // that names the existing member so staff can see at a glance who it is.
+      if (!isValidPhone(phone)) {
+        const message = 'Enter a valid phone number (7\u201315 digits).'
+        return res.status(400).json({ message, fields: { phone: message } })
+      }
+      const duplicate = await findActiveMemberByPhone(req.gymId, phone)
+      if (duplicate) {
+        const message = duplicatePhoneMessage(duplicate)
+        return res.status(409).json({ message, fields: { phone: message }, existingMember: { _id: duplicate._id, name: duplicate.name } })
+      }
+
       const plan = await MembershipPlan.findOne({ _id: planId, gymId: req.gymId })
       if (!plan) return res.status(404).json({ message: 'Plan not found' })
 
@@ -190,14 +237,47 @@ router.post('/',
       const startDate = membershipStartDate ? new Date(membershipStartDate) : new Date()
       const expiryDate = addPlanDuration(startDate, plan)
 
-      const member = await Member.create({
-        gymId: req.gymId, name, phone, email, dob, age, gender, height,
-        currentPlanId: plan._id, membershipStatus: 'active',
-        membershipStartDate: startDate, membershipExpiryDate: expiryDate,
-        assignedTrainerId, source: source || 'walk-in', emergencyContact, healthNotes,
+      // Referral: a friend's code gives this member a first-invoice discount
+      // and (once they pay) rewards the referrer. Wrong codes are rejected
+      // loudly rather than silently ignored — staff are typing it in front
+      // of the customer and should know it didn't take.
+      let referrer = null
+      let referralPercent = 0
+      if (referralCode && String(referralCode).trim()) {
+        const settings = await getReferralSettings(req.gymId)
+        if (!settings.enabled) return res.status(400).json({ message: 'The referral programme isn\u2019t switched on for this gym' })
+        referrer = await findReferrer(req.gymId, referralCode)
+        if (!referrer) return res.status(400).json({ message: 'That referral code isn\u2019t valid' })
+        const digits = (v) => String(v || '').replace(/\D/g, '').slice(-10)
+        if (digits(referrer.phone) === digits(phone)) {
+          return res.status(400).json({ message: 'A member can\u2019t refer themselves' })
+        }
+        referralPercent = settings.refereeDiscountPercent
+      }
+
+      // Coupon and referral discounts don't stack — the larger one wins.
+      const discount = await resolveDiscount({
+        gymId: req.gymId, couponCode, referralPercent,
+        amount: plan.price, type: 'membership', planId: plan._id,
       })
 
-      const invoice = await Invoice.create(buildInvoicePayload(req.gymId, member._id, plan, startDate))
+      const member = await Member.create({
+        gymId: req.gymId, name, phone, email, dob, age, gender, height,
+        currentPlanId: plan._id,
+        // A back-dated start can mean the period has already ended — don't store that as 'active'.
+        membershipStatus: statusForExpiry(expiryDate), joinDate: startDate,
+        membershipStartDate: startDate, membershipExpiryDate: expiryDate,
+        assignedTrainerId, source: referrer ? 'referral' : (source || 'walk-in'),
+        referredBy: referrer?._id,
+        referralCode: await generateReferralCode(req.gymId),
+        emergencyContact, healthNotes,
+      })
+
+      const invoice = await Invoice.create(buildInvoicePayload(req.gymId, member._id, plan, startDate, discount))
+      await recordRedemption({
+        gymId: req.gymId, couponId: discount.couponId, memberId: member._id,
+        invoiceId: invoice._id, discountAmount: discount.discountAmount,
+      })
 
       // Default member-portal PIN = last 4 digits of the phone number.
       await createDefaultMemberPin(member)
@@ -208,7 +288,7 @@ router.post('/',
 )
 
 // PATCH /api/members/:id
-router.patch('/:id', protect, authorize('owner', 'manager'), async (req, res, next) => {
+router.patch('/:id', protect, permit('members.manage'), async (req, res, next) => {
   try {
     const allowed = ['name', 'phone', 'email', 'dob', 'age', 'gender', 'height', 'photo', 'emergencyContact', 'healthNotes', 'assignedTrainerId', 'membershipStatus', 'source', 'membershipStartDate', 'membershipExpiryDate', 'currentPlanId']
     const updates = {}
@@ -222,6 +302,18 @@ router.patch('/:id', protect, authorize('owner', 'manager'), async (req, res, ne
       if (!plan) return res.status(404).json({ message: 'Plan not found' })
     }
 
+    if (updates.phone !== undefined) {
+      if (!isValidPhone(updates.phone)) {
+        const message = 'Enter a valid phone number (7\u201315 digits).'
+        return res.status(400).json({ message, fields: { phone: message } })
+      }
+      const duplicate = await findActiveMemberByPhone(req.gymId, updates.phone, req.params.id)
+      if (duplicate) {
+        const message = duplicatePhoneMessage(duplicate)
+        return res.status(409).json({ message, fields: { phone: message }, existingMember: { _id: duplicate._id, name: duplicate.name } })
+      }
+    }
+
     const member = await Member.findOneAndUpdate(
       { _id: req.params.id, gymId: req.gymId },
       updates,
@@ -233,11 +325,15 @@ router.patch('/:id', protect, authorize('owner', 'manager'), async (req, res, ne
 })
 
 // POST /api/members/:id/renew
-router.post('/:id/renew', protect, authorize('owner', 'manager', 'receptionist'), async (req, res, next) => {
+router.post('/:id/renew', protect, permit('members.enrol'), async (req, res, next) => {
   try {
-    const { planId, startDate } = req.body
+    const { planId, startDate, couponCode } = req.body
     const member = await Member.findOne({ _id: req.params.id, gymId: req.gymId })
     if (!member) return res.status(404).json({ message: 'Member not found' })
+
+    // Renewing while on hold: end the hold first so the frozen days are
+    // added back before the renewal extends from the corrected expiry.
+    if (member.membershipStatus === 'paused') await resumeMembership(member, { by: req.user?._id })
 
     const plan = await MembershipPlan.findOne({ _id: planId || member.currentPlanId, gymId: req.gymId })
     if (!plan) return res.status(404).json({ message: 'Plan not found' })
@@ -246,23 +342,31 @@ router.post('/:id/renew', protect, authorize('owner', 'manager', 'receptionist')
     // future), always base the new expiry off that. Otherwise fall back to
     // the normal "extend from current expiry, or from today if already
     // lapsed" behaviour.
-    let base
-    if (startDate) {
-      base = new Date(startDate)
-    } else {
-      base = (member.membershipStatus === 'active' && member.membershipExpiryDate > new Date())
-        ? new Date(member.membershipExpiryDate)
-        : new Date()
-    }
+    const period = renewalPeriod({
+      explicitStart: startDate, status: member.membershipStatus,
+      expiry: member.membershipExpiryDate, existingStart: member.membershipStartDate,
+    })
+    const base = period.base
     const newExpiry = addPlanDuration(base, plan)
+
+    // Validate the coupon before touching the member, so a bad code can't
+    // leave a half-renewed membership behind.
+    const discount = await resolveDiscount({
+      gymId: req.gymId, memberId: member._id, couponCode,
+      amount: plan.price, type: 'membership', planId: plan._id,
+    })
 
     member.currentPlanId = plan._id
     member.membershipStatus = 'active'
-    member.membershipStartDate = startDate ? new Date(startDate) : member.membershipStartDate
+    member.membershipStartDate = period.start // unchanged when extending a running membership; moves when a new period begins
     member.membershipExpiryDate = newExpiry
     await member.save()
 
-    const invoice = await Invoice.create(buildInvoicePayload(req.gymId, member._id, plan))
+    const invoice = await Invoice.create(buildInvoicePayload(req.gymId, member._id, plan, undefined, discount))
+    await recordRedemption({
+      gymId: req.gymId, couponId: discount.couponId, memberId: member._id,
+      invoiceId: invoice._id, discountAmount: discount.discountAmount,
+    })
 
     // Fire renewal invoice email (non-blocking)
     fireEnrolmentEmails({ member, invoice, plan, gymId: req.gymId, isRenewal: true })
@@ -271,10 +375,34 @@ router.post('/:id/renew', protect, authorize('owner', 'manager', 'receptionist')
   } catch (err) { next(err) }
 })
 
-// DELETE /api/members/:id — soft delete
-router.delete('/:id', protect, authorize('owner', 'manager'), async (req, res, next) => {
+// POST /api/members/:id/freeze — put an active membership on hold
+// Body: { endDate?: ISO date (planned auto-resume), reason?: string, fee?: number (tax-inclusive ₹) }
+router.post('/:id/freeze', protect, permit('members.hold'), async (req, res, next) => {
   try {
-    await Member.findOneAndUpdate({ _id: req.params.id, gymId: req.gymId }, { isActive: false })
+    const member = await Member.findOne({ _id: req.params.id, gymId: req.gymId })
+    if (!member) return res.status(404).json({ message: 'Member not found' })
+    const { endDate, reason, fee } = req.body
+    const { feeInvoice } = await freezeMembership(member, { endDate, reason, fee, by: req.user?._id })
+    res.json({ member, feeInvoice })
+  } catch (err) { next(err) }
+})
+
+// POST /api/members/:id/unfreeze — resume now; the days spent on hold are added to the expiry
+router.post('/:id/unfreeze', protect, permit('members.hold'), async (req, res, next) => {
+  try {
+    const member = await Member.findOne({ _id: req.params.id, gymId: req.gymId })
+    if (!member) return res.status(404).json({ message: 'Member not found' })
+    const { days } = await resumeMembership(member, { by: req.user?._id })
+    res.json({ member, daysAdded: days })
+  } catch (err) { next(err) }
+})
+
+// DELETE /api/members/:id — soft delete
+router.delete('/:id', protect, permit('members.manage'), async (req, res, next) => {
+  try {
+    const archived = await Member.findOneAndUpdate({ _id: req.params.id, gymId: req.gymId }, { isActive: false })
+    // An archived member must not be able to log in, and their login must not block the number being reused.
+    if (archived) await MemberAuth.deleteOne({ memberId: archived._id })
     res.json({ message: 'Member archived' })
   } catch (err) { next(err) }
 })

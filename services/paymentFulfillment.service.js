@@ -6,12 +6,18 @@ import { sendInvoiceEmail } from './email.service.js'
 import { resolveGymSender } from '../utils/gymEmailSender.js'
 import { sendPushToMember } from './pushNotification.service.js'
 import { syncMemberPTPlans } from './ptPlanSync.service.js'
+import { resumeMembership } from './membershipFreeze.service.js'
+import { grantReferralReward } from './referral.service.js'
+import { renewalPeriod } from '../utils/membershipDates.js'
 
 const VALID_PAYMENT_METHODS = ['cash', 'upi', 'card', 'netbanking', 'wallet', 'emi', 'paylater', 'online', 'other']
 
 function normalizeMethod(method) {
   return VALID_PAYMENT_METHODS.includes(method) ? method : 'other'
 }
+
+const round2 = (n) => Math.round(n * 100) / 100
+const EPS = 0.005
 
 /**
  * Marks an invoice paid and — the first time only — applies its
@@ -40,6 +46,18 @@ export async function fulfillInvoicePayment({ invoiceId, razorpayPaymentId, razo
   if (invoice.status === 'paid') {
     return { invoice, member: await Member.findById(invoice.memberId), assignment: null, alreadyProcessed: true }
   }
+
+  // Whatever hasn't been recorded yet is settled by this payment — keeps the
+  // payments ledger summing to totalAmount whether the invoice was paid in
+  // one go or finished off after part payments.
+  const remaining = round2(invoice.totalAmount - (invoice.amountPaid || 0))
+  if (remaining > EPS) {
+    invoice.payments.push({
+      amount: remaining, method: normalizeMethod(method), paidAt: new Date(),
+      razorpayPaymentId: razorpayPaymentId || undefined,
+    })
+  }
+  invoice.amountPaid = invoice.totalAmount
 
   invoice.status = 'paid'
   invoice.paidAt = new Date()
@@ -75,13 +93,18 @@ export async function fulfillInvoicePayment({ invoiceId, razorpayPaymentId, razo
         .catch((e) => console.error('[payment-fulfillment] pt-plan-sync failed:', e.message))
     } else if (invoice.planId) {
       const plan = invoice.planId
-      const base = (member.membershipStatus === 'active' && member.membershipExpiryDate && member.membershipExpiryDate > new Date())
-        ? new Date(member.membershipExpiryDate)
-        : new Date()
+      // Renewing while on hold: end the hold first so the frozen days are
+      // added back, then extend from the corrected expiry.
+      if (member.membershipStatus === 'paused') {
+        try { await resumeMembership(member) } catch (e) { console.error('[payment-fulfillment] auto-resume failed:', e.message) }
+      }
+      const { base, start } = renewalPeriod({
+        status: member.membershipStatus, expiry: member.membershipExpiryDate, existingStart: member.membershipStartDate,
+      })
 
       member.currentPlanId = plan._id
       member.membershipStatus = 'active'
-      if (!member.membershipStartDate) member.membershipStartDate = new Date()
+      member.membershipStartDate = start // a lapsed membership starts a fresh period today
       member.membershipExpiryDate = addPlanDuration(base, plan)
       await member.save()
     }
@@ -89,6 +112,10 @@ export async function fulfillInvoicePayment({ invoiceId, razorpayPaymentId, razo
   }
 
   await invoice.save()
+
+  // Referral reward (no-op unless this member was referred, the gym has the
+  // programme on, and this is their first paid membership invoice).
+  if (member) await grantReferralReward(member, invoice)
 
   // Fire-and-forget notifications — never block the payment response on
   // email/push delivery.
@@ -122,4 +149,61 @@ export async function fulfillInvoicePayment({ invoiceId, razorpayPaymentId, razo
   }
 
   return { invoice, member, assignment }
+}
+
+/**
+ * Records one instalment against an invoice (front-desk part payment, or an
+ * online payment of the balance via a payment link).
+ *
+ *  - Idempotent per razorpayPaymentId (webhooks can be delivered twice).
+ *  - Amounts above the balance are clamped to it.
+ *  - The instalment that brings amountPaid up to totalAmount finalises the
+ *    invoice through fulfillInvoicePayment(), so membership/PT activation,
+ *    referral rewards and receipts behave exactly as for a single payment.
+ *
+ * Throws Error with `.status` for problems staff should see.
+ */
+export async function recordInvoicePayment({ invoiceId, amount, method, razorpayPaymentId, note, receivedBy }) {
+  const fail = (m, status = 400) => Object.assign(new Error(m), { status })
+
+  const invoice = await Invoice.findById(invoiceId)
+  if (!invoice) throw fail('Invoice not found', 404)
+  if (invoice.status === 'paid') throw fail('Invoice is already paid')
+  if (['cancelled', 'refunded'].includes(invoice.status)) throw fail(`Invoice is ${invoice.status}`)
+
+  if (razorpayPaymentId && invoice.payments.some((p) => p.razorpayPaymentId === razorpayPaymentId)) {
+    return { invoice, duplicate: true }
+  }
+
+  const balance = round2(invoice.totalAmount - (invoice.amountPaid || 0))
+  let credited = round2(Number(amount))
+  if (!(credited > 0)) throw fail('Enter an amount greater than zero')
+  if (credited > balance + EPS) {
+    if (razorpayPaymentId) credited = balance // money already received online — credit what's owed
+    else throw fail(`Amount is more than the balance due (\u20B9${balance.toLocaleString('en-IN')})`)
+  }
+
+  invoice.payments.push({
+    amount: credited, method: normalizeMethod(method), paidAt: new Date(),
+    note: note?.trim() || undefined, razorpayPaymentId: razorpayPaymentId || undefined, receivedBy,
+  })
+  invoice.amountPaid = round2((invoice.amountPaid || 0) + credited)
+
+  if (invoice.amountPaid >= invoice.totalAmount - EPS) {
+    await invoice.save()
+    return fulfillInvoicePayment({ invoiceId: invoice._id, razorpayPaymentId, method })
+  }
+
+  invoice.status = 'partial'
+  invoice.paymentMethod = normalizeMethod(method)
+  await invoice.save()
+
+  const left = round2(invoice.totalAmount - invoice.amountPaid)
+  sendPushToMember(invoice.memberId, {
+    title: 'Payment received',
+    body: `\u20B9${credited.toLocaleString('en-IN')} received for invoice ${invoice.invoiceNumber}. Balance due: \u20B9${left.toLocaleString('en-IN')}.`,
+    url: '/billing', tag: 'invoice-partial',
+  }).catch((e) => console.error('[payment-fulfillment] push failed:', e.message))
+
+  return { invoice, partial: true }
 }

@@ -1,11 +1,15 @@
 import { Schema, model } from 'mongoose'
 import bcrypt from 'bcryptjs'
+import { emailKey } from '../utils/identity.js'
 
 const userSchema = new Schema(
   {
     gymId: { type: Schema.Types.ObjectId, ref: 'Gym', required: true, index: true },
     name: { type: String, required: true, trim: true },
     email: { type: String, required: true, lowercase: true, trim: true },
+    // Comparison form of `email` (lower-case, no +tag, Gmail dots ignored) — see utils/identity.js.
+    // Globally unique: login looks a user up by email alone, so two gyms can never share one.
+    emailKey: { type: String, select: false },
     phone: { type: String },
     passwordHash: { type: String, required: true, select: false },
 
@@ -40,6 +44,18 @@ const userSchema = new Schema(
 )
 
 userSchema.index({ gymId: 1, email: 1 }, { unique: true })
+userSchema.index({ emailKey: 1 }, { unique: true, partialFilterExpression: { emailKey: { $type: 'string' } } })
+
+userSchema.pre('validate', function (next) {
+  if (this.isNew || this.isModified('email')) this.emailKey = emailKey(this.email)
+  next()
+})
+userSchema.pre('findOneAndUpdate', function (next) {
+  const u = this.getUpdate() || {}
+  const target = u.$set || u
+  if (target.email !== undefined) target.emailKey = emailKey(target.email)
+  next()
+})
 
 // Hash passwordHash automatically whenever it's set/changed, whether that's
 // a brand-new user, a staff record created by an owner, or a password

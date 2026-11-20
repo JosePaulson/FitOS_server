@@ -12,6 +12,7 @@ import { startRenewalReminderJob } from './jobs/renewalReminders.js'
 import { startBirthdayJob } from './jobs/birthdayGreetings.js'
 import { startPTPlanReminderJob } from './jobs/ptPlanReminders.js'
 import { startHydrationRemindersJob } from './jobs/hydrationReminders.js'
+import { startFreezeAutoResumeJob } from './jobs/freezeAutoResume.js'
 
 // ── Routes ────────────────────────────────────────────────────────────────
 import authRoutes from './routes/auth.routes.js'
@@ -50,6 +51,22 @@ import memberPortalAttendanceCheckinRoutes from './routes/memberPortal.attendanc
 import memberPortalWorkoutLogRoutes from './routes/memberPortal.workoutLog.routes.js'
 import memberPortalPaymentRoutes from './routes/memberPortal.payment.routes.js'
 import webhookRoutes from './routes/webhook.routes.js'
+import couponRoutes from './routes/coupon.routes.js'
+import waiverRoutes from './routes/waiver.routes.js'
+import permissionsRoutes from './routes/permissions.routes.js'
+import auditRoutes from './routes/audit.routes.js'
+import exportRoutes from './routes/export.routes.js'
+import memberPortalWaiverRoutes from './routes/memberPortal.waiver.routes.js'
+import { auditTrail } from './middleware/audit.js'
+import announcementRoutes from './routes/announcement.routes.js'
+import availabilityRoutes from './routes/availability.routes.js'
+import challengeRoutes from './routes/challenge.routes.js'
+import memberPortalProgressRoutes from './routes/memberPortal.progress.routes.js'
+import memberPortalEngagementRoutes from './routes/memberPortal.engagement.routes.js'
+import memberPortalNotificationRoutes from './routes/memberPortal.notifications.routes.js'
+import memberPortalAutoRenewRoutes from './routes/memberPortal.autoRenew.routes.js'
+import { startAutoRenewJob } from './jobs/autoRenew.js'
+import memberPortalReferralRoutes from './routes/memberPortal.referral.routes.js'
 import complaintRoutes from './routes/complaint.routes.js'
 import memberPortalComplaintRoutes from './routes/memberPortal.complaint.routes.js'
 import staffRatingRoutes from './routes/staffRating.routes.js'
@@ -62,6 +79,7 @@ import memberPortalTimetableRoutes from './routes/memberPortal.timetable.routes.
 import memberPortalTransformationRoutes from './routes/memberPortal.transformation.routes.js'
 import memberPortalMealLogRoutes from './routes/memberPortal.mealLog.routes.js'
 import memberPortalHydrationRoutes from './routes/memberPortal.hydration.routes.js'
+import { devOr } from './utils/errors.js'
 
 // ── Connect DB ────────────────────────────────────────────────────────────
 await connectDB()
@@ -126,6 +144,8 @@ const authLimiter = rateLimit({
 
 // ── Mount routes ──────────────────────────────────────────────────────────
 app.use('/api/auth', authLimiter, authRoutes)
+// Audit trail: records sensitive staff actions after they succeed (see middleware/audit.js).
+app.use('/api', auditTrail)
 app.use('/api/leads', leadRoutes)
 app.use('/api/members', memberRoutes)
 app.use('/api/plans', planRoutes)
@@ -133,6 +153,14 @@ app.use('/api/pt-plans', ptPlanRoutes)
 app.use('/api/member-pt-plans', memberPTPlanRoutes)
 app.use('/api/trainer-availability', trainerAvailabilityRoutes)
 app.use('/api/invoices', invoiceRoutes)
+app.use('/api/coupons', couponRoutes)
+app.use('/api/availability', availabilityRoutes)
+app.use('/api/waivers', waiverRoutes)
+app.use('/api/permissions', permissionsRoutes)
+app.use('/api/audit-logs', auditRoutes)
+app.use('/api/export', exportRoutes)
+app.use('/api/announcements', announcementRoutes)
+app.use('/api/challenges', challengeRoutes)
 app.use('/api/attendance', attendanceRoutes)
 app.use('/api/dashboard', dashboardRoutes)
 app.use('/api/analytics', analyticsRoutes)
@@ -153,6 +181,12 @@ app.use('/api/member-portal/pt-plans', memberPortalPTPlanRoutes)
 app.use('/api/member-portal/attendance', memberPortalAttendanceCheckinRoutes)
 app.use('/api/member-portal/workout-logs', memberPortalWorkoutLogRoutes)
 app.use('/api/member-portal/payments', memberPortalPaymentRoutes)
+app.use('/api/member-portal/referral', memberPortalReferralRoutes)
+app.use('/api/member-portal/waiver', memberPortalWaiverRoutes)
+app.use('/api/member-portal/progress', memberPortalProgressRoutes)
+app.use('/api/member-portal/engagement', memberPortalEngagementRoutes)
+app.use('/api/member-portal/notifications', memberPortalNotificationRoutes)
+app.use('/api/member-portal/auto-renew', memberPortalAutoRenewRoutes)
 app.use('/api/member-portal/complaints', memberPortalComplaintRoutes)
 app.use('/api/member-portal/staff-ratings', memberPortalStaffRatingRoutes)
 app.use('/api/member-portal/timetable', memberPortalTimetableRoutes)
@@ -197,10 +231,17 @@ app.get('/health', (_req, res) => {
 })
 
 // ── 404 ───────────────────────────────────────────────────────────────────
-app.use((_req, res) => res.status(404).json({ message: 'Route not found' }))
+app.use((req, res) => res.status(404).json({
+  message: devOr(`Route not found: ${req.method} ${req.originalUrl}`, 'We couldn\u2019t find what you were looking for.'),
+}))
 
 // ── Global error handler (must be last) ───────────────────────────────────
 app.use(errorHandler)
+
+// A rejected promise nobody caught (e.g. a fire-and-forget task) must be logged, not take the whole server down.
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason instanceof Error ? reason.stack : reason)
+})
 
 // ── Cron jobs ─────────────────────────────────────────────────────────────
 if (process.env.NODE_ENV !== 'test') {
@@ -208,6 +249,8 @@ if (process.env.NODE_ENV !== 'test') {
   startBirthdayJob()
   startPTPlanReminderJob()
   startHydrationRemindersJob()
+  startFreezeAutoResumeJob()
+  startAutoRenewJob()
 }
 
 // ── Start server ──────────────────────────────────────────────────────────

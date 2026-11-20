@@ -71,6 +71,41 @@ const gymSchema = new Schema(
       welcomeEmailBody: { type: String, default: '', maxlength: 1000 },
       invoiceEmailBody: { type: String, default: '', maxlength: 1000 },
       renewalEmailBody: { type: String, default: '', maxlength: 1000 },
+
+      // GST details printed on invoice PDFs. Copied onto each invoice at
+      // creation (Invoice.seller) so later edits never rewrite history.
+      gst: {
+        legalName: { type: String, default: '', trim: true, maxlength: 120 },
+        gstin:     { type: String, default: '', trim: true, uppercase: true, maxlength: 15 },
+        address:   { type: String, default: '', trim: true, maxlength: 300 },
+        sac:       { type: String, default: '999723', trim: true, maxlength: 10 }, // fitness / physical well-being services
+        footerNote:{ type: String, default: '', trim: true, maxlength: 300 },
+      },
+
+      // Liability waiver + PAR-Q health form. `text` blank = use the built-in
+      // template (see services/waiver.service.js). `version` bumps whenever
+      // the text changes, so members who signed an older wording can be
+      // asked to sign again.
+      waiver: {
+        enabled: { type: Boolean, default: false },
+        text:    { type: String, default: '', maxlength: 8000 },
+        version: { type: Number, default: 1 },
+      },
+
+      // Owner-chosen permissions per staff role. `undefined` (never set) means
+      // "use the built-in defaults" — an empty array means "nothing".
+      rolePermissions: {
+        manager:      { type: [String], default: undefined },
+        receptionist: { type: [String], default: undefined },
+        trainer:      { type: [String], default: undefined },
+      },
+
+      // "Refer a friend" programme. Disabled until the owner turns it on.
+      referral: {
+        enabled:               { type: Boolean, default: false },
+        referrerRewardDays:    { type: Number, default: 7,  min: 0, max: 365 }, // free days for the referrer
+        refereeDiscountPercent:{ type: Number, default: 10, min: 0, max: 100 }, // off the new member's first invoice
+      },
     },
 
     isActive: { type: Boolean, default: true },

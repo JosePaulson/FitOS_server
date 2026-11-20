@@ -124,6 +124,7 @@ async function analyzeWithGemini(base64Image, mimeType) {
   if (!process.env.GEMINI_API_KEY) {
     const err = new Error('AI vision service not configured. Set GEMINI_API_KEY in server/.env')
     err.statusCode = 503
+    err.userMessage = 'Food scanning isn\u2019t available right now. Please try again later.'
     throw err
   }
 
@@ -158,6 +159,7 @@ async function analyzeWithGemini(base64Image, mimeType) {
     const errBody = await response.json().catch(() => ({}))
     const err = new Error(errBody.error?.message || `Gemini vision API error (${response.status})`)
     err.statusCode = 502
+    err.userMessage = 'We couldn\u2019t analyse that photo right now. Please try again.'
     throw err
   }
 
@@ -167,6 +169,7 @@ async function analyzeWithGemini(base64Image, mimeType) {
   if (data.promptFeedback?.blockReason) {
     const err = new Error(`Image was blocked by AI safety filters (${data.promptFeedback.blockReason}) — try a different photo`)
     err.statusCode = 422
+    err.userMessage = 'That photo couldn\u2019t be analysed \u2014 please try a different one.'
     throw err
   }
 
@@ -182,6 +185,7 @@ async function analyzeWithGemini(base64Image, mimeType) {
       : ''
     const err = new Error(`Empty response from AI vision service${hint}`)
     err.statusCode = 502
+    err.userMessage = 'We couldn\u2019t analyse that photo right now. Please try again.'
     throw err
   }
 
@@ -201,6 +205,7 @@ async function analyzeWithGemini(base64Image, mimeType) {
       console.error('[food-scan] JSON parse failed. finishReason:', candidate?.finishReason, 'raw text:', text.slice(0, 800))
       const err = new Error('Could not parse AI response — try another photo')
       err.statusCode = 502
+    err.userMessage = 'We couldn\u2019t analyse that photo right now. Please try again.'
       throw err
     }
   }
@@ -272,7 +277,7 @@ router.post('/', handleUploadErrors(uploadImage), async (req, res, next) => {
       disclaimer: 'These values are estimated by AI from your photo and are only approximate. They are not a substitute for precise nutrition tracking or medical/dietary advice.',
     })
   } catch (err) {
-    if (err.statusCode) return res.status(err.statusCode).json({ message: err.message })
+    if (err.statusCode && !err.status) err.status = err.statusCode // the central error handler decides what to show
     console.error('[food-scan]', err.message)
     next(err)
   }

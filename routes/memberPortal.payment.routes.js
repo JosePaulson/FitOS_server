@@ -3,7 +3,8 @@ import { memberProtect } from '../middleware/memberAuth.js'
 import Invoice from '../models/Invoice.js'
 import MembershipPlan from '../models/MembershipPlan.js'
 import PTPlan from '../models/PTPlan.js'
-import { extractTax } from '../utils/tax.js'
+import { priceInvoice } from '../utils/pricing.js'
+import { resolveDiscount, validateCoupon, recordRedemption, releaseRedemption } from '../services/coupon.service.js'
 import {
   isRazorpayConfigured,
   createOrder,
@@ -21,11 +22,17 @@ function notConfigured(res) {
   })
 }
 
-/** Builds a pending, not-yet-fulfilled invoice for a member-initiated checkout. */
-function buildPendingInvoice({ gymId, memberId, price, taxRate = 18, type, planId, ptPlanId }) {
-  const { baseAmount, taxAmount, totalAmount } = extractTax(price, taxRate)
+/**
+ * Builds a pending, not-yet-fulfilled invoice for a member-initiated checkout.
+ * `discount` = { discountAmount, couponId, couponCode } from resolveDiscount().
+ */
+function buildPendingInvoice({ gymId, memberId, price, taxRate = 18, type, planId, ptPlanId, discount = {} }) {
+  const { listAmount, discountAmount, baseAmount, taxAmount, totalAmount } =
+    priceInvoice(price, taxRate, discount.discountAmount || 0)
   return {
     gymId, memberId, type, planId, ptPlanId,
+    listAmount, discountAmount,
+    ...(discountAmount > 0 ? { couponId: discount.couponId, couponCode: discount.couponCode } : {}),
     baseAmount, taxRate, taxAmount, totalAmount,
     status: 'pending',
     dueDate: new Date(),
@@ -33,10 +40,59 @@ function buildPendingInvoice({ gymId, memberId, price, taxRate = 18, type, planI
   }
 }
 
+/**
+ * Finds the member's own abandoned checkout for this plan (so retries don't
+ * pile up duplicate pending invoices) and re-prices it for the coupon sent
+ * with THIS request — or creates a fresh invoice. Returns the invoice, or
+ * sends an error response and returns null.
+ */
+async function pricedCheckoutInvoice(req, res, { type, plan, price, taxRate, planField }) {
+  const discount = await resolveDiscount({
+    gymId: req.gymId, memberId: req.memberId, couponCode: req.body.couponCode,
+    amount: price, type, planId: plan._id,
+  })
+  const priced = buildPendingInvoice({
+    gymId: req.gymId, memberId: req.memberId, price, taxRate, type, [planField]: plan._id, discount,
+  })
+
+  // Razorpay can't charge under \u20B91 \u2014 a (near-)100% coupon has to be applied at
+  // the front desk. Checked BEFORE touching any existing invoice.
+  if (priced.totalAmount < 1) {
+    res.status(400).json({ message: 'This coupon covers the full amount \u2014 please ask the front desk to apply it.' })
+    return null
+  }
+
+  let invoice = await Invoice.findOne({
+    memberId: req.memberId, gymId: req.gymId, type,
+    [planField]: plan._id, status: 'pending', fulfilled: false,
+  })
+
+  if (invoice) {
+    // Re-price the abandoned invoice for whatever coupon (or none) came with this attempt.
+    await releaseRedemption(invoice._id)
+    invoice.set({
+      listAmount: priced.listAmount, discountAmount: priced.discountAmount,
+      couponId: priced.couponId, couponCode: priced.couponCode,
+      baseAmount: priced.baseAmount, taxRate: priced.taxRate,
+      taxAmount: priced.taxAmount, totalAmount: priced.totalAmount,
+    })
+    await invoice.save()
+  } else {
+    invoice = await Invoice.create(priced)
+  }
+
+  await recordRedemption({
+    gymId: req.gymId, couponId: discount.couponId, memberId: req.memberId,
+    invoiceId: invoice._id, discountAmount: discount.discountAmount,
+  })
+  return invoice
+}
+
 /** Creates a fresh Razorpay order for a pending invoice and responds with what Checkout needs. */
 async function respondWithOrder(res, invoice) {
+  // Part-paid invoices are settled for what's still owed, not the full total.
   const order = await createOrder({
-    amount: invoice.totalAmount,
+    amount: invoice.balanceDue,
     receipt: invoice.invoiceNumber,
     notes: {
       invoiceId: invoice._id.toString(),
@@ -75,7 +131,7 @@ router.post('/invoices/:id/order', async (req, res, next) => {
 
     const invoice = await Invoice.findOne({ _id: req.params.id, memberId: req.memberId, gymId: req.gymId })
     if (!invoice) return res.status(404).json({ message: 'Invoice not found' })
-    if (invoice.status !== 'pending') {
+    if (!['pending', 'partial'].includes(invoice.status)) {
       return res.status(400).json({ message: `This invoice is already ${invoice.status}.` })
     }
 
@@ -100,17 +156,10 @@ router.post('/membership/checkout', async (req, res, next) => {
     const plan = await MembershipPlan.findOne({ _id: planId, gymId: req.gymId, isActive: true })
     if (!plan) return res.status(404).json({ message: 'Plan not found' })
 
-    let invoice = await Invoice.findOne({
-      memberId: req.memberId, gymId: req.gymId, type: 'membership',
-      planId: plan._id, status: 'pending', fulfilled: false,
+    const invoice = await pricedCheckoutInvoice(req, res, {
+      type: 'membership', plan, price: plan.price, taxRate: plan.taxRate, planField: 'planId',
     })
-    if (!invoice) {
-      invoice = await Invoice.create(buildPendingInvoice({
-        gymId: req.gymId, memberId: req.memberId,
-        price: plan.price, taxRate: plan.taxRate,
-        type: 'membership', planId: plan._id,
-      }))
-    }
+    if (!invoice) return
 
     await respondWithOrder(res, invoice)
   } catch (err) { next(err) }
@@ -130,21 +179,39 @@ router.post('/pt/checkout', async (req, res, next) => {
     const plan = await PTPlan.findOne({ _id: ptPlanId, gymId: req.gymId, isActive: true })
     if (!plan) return res.status(404).json({ message: 'PT plan not found' })
 
-    let invoice = await Invoice.findOne({
-      memberId: req.memberId, gymId: req.gymId, type: 'pt',
-      ptPlanId: plan._id, status: 'pending', fulfilled: false,
+    // PT plan fees aren't modelled with a tax rate on the catalog (unlike
+    // membership plans) — treat the fee as the flat total, no GST split.
+    const invoice = await pricedCheckoutInvoice(req, res, {
+      type: 'pt', plan, price: plan.fee, taxRate: 0, planField: 'ptPlanId',
     })
-    if (!invoice) {
-      // PT plan fees aren't modelled with a tax rate on the catalog (unlike
-      // membership plans) — treat the fee as the flat total, no GST split.
-      invoice = await Invoice.create(buildPendingInvoice({
-        gymId: req.gymId, memberId: req.memberId,
-        price: plan.fee, taxRate: 0,
-        type: 'pt', ptPlanId: plan._id,
-      }))
-    }
+    if (!invoice) return
 
     await respondWithOrder(res, invoice)
+  } catch (err) { next(err) }
+})
+
+/**
+ * POST /api/member-portal/payments/coupons/validate
+ * Body: { code, planId, type?: 'membership'|'pt' }
+ * Lets the member see the discount before paying. Checkout re-validates, so
+ * this is only a preview.
+ */
+router.post('/coupons/validate', async (req, res, next) => {
+  try {
+    const { code, planId } = req.body
+    const type = req.body.type === 'pt' ? 'pt' : 'membership'
+    if (!planId) return res.status(400).json({ message: 'Plan required' })
+
+    const plan = type === 'pt'
+      ? await PTPlan.findOne({ _id: planId, gymId: req.gymId, isActive: true })
+      : await MembershipPlan.findOne({ _id: planId, gymId: req.gymId, isActive: true })
+    if (!plan) return res.status(404).json({ message: 'Plan not found' })
+
+    const amount = type === 'pt' ? plan.fee : plan.price
+    const { coupon, discount } = await validateCoupon({
+      gymId: req.gymId, memberId: req.memberId, code, amount, type, planId,
+    })
+    res.json({ code: coupon.code, discount, amount, finalAmount: Math.round((amount - discount) * 100) / 100 })
   } catch (err) { next(err) }
 })
 

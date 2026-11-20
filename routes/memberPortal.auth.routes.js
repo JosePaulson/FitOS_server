@@ -106,14 +106,14 @@ router.post('/login',
  */
 router.post('/refresh', async (req, res, next) => {
   const { refreshToken } = req.body
-  if (!refreshToken) return res.status(401).json({ message: 'Refresh token required' })
+  if (!refreshToken) return res.status(401).json({ message: 'Your session has expired. Please sign in again.' })
   try {
     const secret = process.env.MEMBER_JWT_REFRESH_SECRET || process.env.JWT_REFRESH_SECRET
     const decoded = jwt.verify(refreshToken, secret)
     const auth = await MemberAuth.findById(decoded.id).select('+refreshToken')
 
     if (!auth || auth.refreshToken !== refreshToken) {
-      return res.status(401).json({ message: 'Invalid refresh token' })
+      return res.status(401).json({ message: 'Your session has expired. Please sign in again.' })
     }
 
     const newAccess = signAccess(auth._id)

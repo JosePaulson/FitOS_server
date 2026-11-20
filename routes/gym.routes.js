@@ -3,6 +3,7 @@ import { body, validationResult } from 'express-validator'
 import Gym from '../models/Gym.js'
 import { protect, authorize } from '../middleware/auth.js'
 import { sendEmail } from '../services/email.service.js'
+import { devOr, isDev } from '../utils/errors.js'
 
 const router = Router()
 
@@ -69,6 +70,44 @@ router.patch('/settings',
             updates[`settings.${k}`] = req.body.settings[k]
           }
         })
+      }
+
+      // Waiver: on/off + wording. Changing the wording bumps the version, which
+      // is how members who signed the old text get asked to sign again.
+      const waiver = req.body.settings?.waiver
+      if (waiver) {
+        if (waiver.enabled !== undefined) updates['settings.waiver.enabled'] = !!waiver.enabled
+        if (waiver.text !== undefined) {
+          const text = String(waiver.text ?? '').trim().slice(0, 8000)
+          const current = await Gym.findById(req.gymId).select('settings.waiver').lean()
+          if (text !== (current?.settings?.waiver?.text || '').trim()) {
+            updates['settings.waiver.text'] = text
+            updates['settings.waiver.version'] = (current?.settings?.waiver?.version || 1) + 1
+          }
+        }
+      }
+
+      // GST details (printed on invoices) and the referral programme.
+      const gst = req.body.settings?.gst
+      if (gst) {
+        for (const k of ['legalName', 'address', 'sac', 'footerNote']) {
+          if (gst[k] !== undefined) updates[`settings.gst.${k}`] = String(gst[k] ?? '').trim().slice(0, k === 'address' || k === 'footerNote' ? 300 : 120)
+        }
+        if (gst.gstin !== undefined) {
+          const g = String(gst.gstin ?? '').trim().toUpperCase()
+          // Standard 15-character GSTIN: 2-digit state, 10-char PAN, entity no., 'Z', checksum.
+          if (g && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(g)) {
+            return res.status(400).json({ message: 'GSTIN doesn\u2019t look right \u2014 it should be 15 characters, e.g. 29ABCDE1234F1Z5' })
+          }
+          updates['settings.gst.gstin'] = g
+        }
+      }
+      const referral = req.body.settings?.referral
+      if (referral) {
+        if (referral.enabled !== undefined) updates['settings.referral.enabled'] = !!referral.enabled
+        const num = (v, max) => Math.min(max, Math.max(0, Math.round(Number(v) || 0)))
+        if (referral.referrerRewardDays !== undefined) updates['settings.referral.referrerRewardDays'] = num(referral.referrerRewardDays, 365)
+        if (referral.refereeDiscountPercent !== undefined) updates['settings.referral.refereeDiscountPercent'] = num(referral.refereeDiscountPercent, 100)
       }
 
       if (req.body.location) {
@@ -139,13 +178,16 @@ router.post('/settings/test-email', protect, authorize('owner'), async (req, res
 
     res.json({ message: `Test email sent to ${to}` })
   } catch (err) {
-    // Surface the SendGrid error detail so the owner can debug
+    // Details (provider message, env-var names) are for developers — owners just get a clear next step.
+    console.error('[test-email] failed:', err.message)
     res.status(500).json({
-      message: 'Failed to send test email',
-      detail:  err.message,
-      hint:    !process.env.SENDGRID_API_KEY
-        ? 'SENDGRID_API_KEY is not set in server/.env'
-        : 'Check that your sender domain is verified in SendGrid → Sender Authentication',
+      message: 'We couldn\u2019t send the test email. Please check your email settings and try again.',
+      ...(isDev() && {
+        detail: err.message,
+        hint: !process.env.SENDGRID_API_KEY
+          ? 'SENDGRID_API_KEY is not set in server/.env'
+          : 'Check that your sender domain is verified in SendGrid \u2192 Sender Authentication',
+      }),
     })
   }
 })

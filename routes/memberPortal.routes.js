@@ -6,6 +6,9 @@ import Invoice from '../models/Invoice.js'
 import Attendance from '../models/Attendance.js'
 import WorkoutPlan from '../models/WorkoutPlan.js'
 import DietPlan from '../models/DietPlan.js'
+import Gym from '../models/Gym.js'
+import { visitDaysFor, dailyStreak, monthlyVisitCounts } from '../services/engagement.service.js'
+import { streamInvoicePdf } from '../services/invoicePdf.service.js'
 import { uploadImage, handleUploadErrors } from '../middleware/upload.js'
 import { uploadImageBuffer, deleteAsset } from '../services/cloudinaryUpload.service.js'
 
@@ -157,6 +160,22 @@ router.get('/invoices/:id', async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
+/** GET /api/member-portal/invoices/:id/pdf — download a GST invoice / receipt */
+router.get('/invoices/:id/pdf', async (req, res, next) => {
+  try {
+    const invoice = await Invoice.findOne({ _id: req.params.id, gymId: req.gymId, memberId: req.memberId })
+      .populate('planId', 'name').populate('ptPlanId', 'name')
+    if (!invoice) return res.status(404).json({ message: 'Invoice not found' })
+    const [member, gym] = await Promise.all([
+      Member.findById(req.memberId).select('name phone email'),
+      Gym.findById(req.gymId).select('name address city state phone settings.gst'),
+    ])
+    res.setHeader('Content-Type', 'application/pdf')
+    res.setHeader('Content-Disposition', `attachment; filename="${invoice.invoiceNumber || 'invoice'}.pdf"`)
+    streamInvoicePdf({ invoice, member, gym }, res)
+  } catch (err) { next(err) }
+})
+
 /* ── Attendance ───────────────────────────────────────────────────────────── */
 
 /** GET /api/member-portal/attendance?month=2025-01 */
@@ -179,20 +198,9 @@ router.get('/attendance', async (req, res, next) => {
 
     const records = await Attendance.find(filter).sort({ date: -1 })
 
-    // Build streak — consecutive days attended
-    const dates = records.map((r) => r.date.toISOString().split('T')[0])
-    const uniqueDates = [...new Set(dates)].sort().reverse()
-    let streak = 0
-    const today = new Date().toISOString().split('T')[0]
-    let check = today
-    for (const d of uniqueDates) {
-      if (d === check) {
-        streak++
-        const dt = new Date(check)
-        dt.setDate(dt.getDate() - 1)
-        check = dt.toISOString().split('T')[0]
-      } else break
-    }
+    // Day streak counts ANY visit (attendance / completed PT / workout log), once per IST day,
+    // across all time — not just the records in the month being viewed.
+    const streak = dailyStreak(await visitDaysFor(req.memberId))
 
     res.json({ records, total: records.length, streak })
   } catch (err) { next(err) }
@@ -201,17 +209,8 @@ router.get('/attendance', async (req, res, next) => {
 /** GET /api/member-portal/attendance/summary — monthly check-in counts */
 router.get('/attendance/summary', async (req, res, next) => {
   try {
-    const summary = await Attendance.aggregate([
-      { $match: { gymId: req.gymId, memberId: req.memberId } },
-      {
-        $group: {
-          _id: { year: { $year: '$date' }, month: { $month: '$date' } },
-          count: { $sum: 1 },
-        },
-      },
-      { $sort: { '_id.year': -1, '_id.month': -1 } },
-      { $limit: 6 },
-    ])
+    // Distinct visit days per month (attendance / completed PT / workout log, max one per day).
+    const summary = await monthlyVisitCounts(req.memberId, 6)
     res.json(summary)
   } catch (err) { next(err) }
 })

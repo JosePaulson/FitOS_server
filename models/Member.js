@@ -1,4 +1,5 @@
 import { Schema, model } from 'mongoose'
+import { phoneKey } from '../utils/identity.js'
 
 const memberSchema = new Schema(
   {
@@ -6,6 +7,12 @@ const memberSchema = new Schema(
 
     name: { type: String, required: true, trim: true },
     phone: { type: String, required: true, trim: true },
+    // Digits-only comparison form of `phone` (see utils/identity.js). Set automatically; powers the
+    // "one active member per phone number" rule, including at the database level.
+    phoneKey: { type: String, select: false },
+    // The day this person joined the gym (can be back-dated at enrolment). Unlike
+    // membershipStartDate it never moves when a membership is renewed.
+    joinDate: { type: Date },
     email: { type: String, lowercase: true, trim: true },
     dob: { type: Date },     // optional — also powers birthday greetings
     age: { type: Number },   // optional — for members who'd rather not share a DOB
@@ -34,12 +41,81 @@ const memberSchema = new Schema(
     },
     referredBy: { type: Schema.Types.ObjectId, ref: 'Member' },
 
+    // Latest signed waiver, denormalised so the member list can show status
+    // without a join. Full signed record lives in MemberWaiver.
+    waiver: {
+      version:     { type: Number },
+      signedAt:    { type: Date },
+      parqFlagged: { type: Boolean },   // any "yes" on the PAR-Q
+    },
+
+    // Engagement: weekly visit goal for streaks, and a leaderboard opt-out.
+    weeklyGoal: { type: Number, min: 1, max: 7, default: 3 },
+    hideFromLeaderboard: { type: Boolean, default: false },
+
+    // Auto-renew: when on, a renewal invoice (+ payment link) is prepared a few
+    // days before expiry and the member is nudged to pay in one tap.
+    // lastNoticeForExpiry stops the same expiry being notified twice.
+    autoRenew: {
+      enabled: { type: Boolean, default: false },
+      lastNoticeForExpiry: { type: Date },
+    },
+
+    // Personal code this member can share ("Refer a friend"). Generated at
+    // enrolment (or lazily for older members the first time they open the
+    // referral card). Unique per gym — see index below.
+    referralCode: { type: String, uppercase: true, trim: true },
+    // Set once the referrer has been rewarded for THIS member's first paid
+    // membership invoice, so the reward can never be granted twice.
+    referralRewardGrantedAt: { type: Date },
+
+    // Membership hold ("freeze"). While membershipStatus === 'paused',
+    // `freeze` describes the current hold; on resume the days spent frozen
+    // are added to membershipExpiryDate and the hold moves to freezeHistory.
+    freeze: {
+      startDate: { type: Date },
+      endDate:   { type: Date },   // optional planned auto-resume date
+      reason:    { type: String, trim: true },
+      feeInvoiceId: { type: Schema.Types.ObjectId, ref: 'Invoice' },
+    },
+    freezeHistory: [{
+      startDate: Date,
+      endDate:   Date,             // when it actually ended
+      days:      Number,           // days added back to the expiry
+      reason:    String,
+      feeInvoiceId: { type: Schema.Types.ObjectId, ref: 'Invoice' },
+      by:        { type: Schema.Types.ObjectId, ref: 'User' },
+    }],
+
     isActive: { type: Boolean, default: true },
   },
   { timestamps: true }
 )
 
 memberSchema.index({ gymId: 1, phone: 1 })
+// One ACTIVE member per phone number per gym. Archiving a member (isActive: false) frees the number.
+memberSchema.index(
+  { gymId: 1, phoneKey: 1 },
+  { unique: true, partialFilterExpression: { phoneKey: { $type: 'string' }, isActive: true } }
+)
+
+memberSchema.pre('validate', function (next) {
+  if (this.isNew || this.isModified('phone')) this.phoneKey = phoneKey(this.phone)
+  next()
+})
+// PATCH /members/:id updates through findOneAndUpdate, which skips document hooks.
+memberSchema.pre('findOneAndUpdate', function (next) {
+  const u = this.getUpdate() || {}
+  const target = u.$set || u
+  if (target.phone !== undefined) target.phoneKey = phoneKey(target.phone)
+  next()
+})
 memberSchema.index({ gymId: 1, membershipExpiryDate: 1 })
+// Referral codes must be unique within a gym; members without one (older
+// records) are excluded so they don't collide on "missing".
+memberSchema.index(
+  { gymId: 1, referralCode: 1 },
+  { unique: true, partialFilterExpression: { referralCode: { $type: 'string' } } }
+)
 
 export default model('Member', memberSchema)

@@ -4,6 +4,7 @@ import PTSession from '../models/PTSession.js'
 import Member from '../models/Member.js'
 import { protect, authorize } from '../middleware/auth.js'
 import { sendPushToMember } from '../services/pushNotification.service.js'
+import { evaluateEngagement } from '../services/engagement.service.js'
 import { syncMemberPTPlans } from '../services/ptPlanSync.service.js'
 import { estimateCaloriesBurned } from '../utils/calories.js'
 import { istStartOfDay, istEndOfDay } from '../utils/dateIST.js'
@@ -218,6 +219,9 @@ router.patch('/:id',
           await syncMemberPTPlans(req.gymId, session.memberId?._id || session.memberId)
         } catch (e) { console.error('[pt-plan-sync] update failed:', e.message) }
       }
+
+      // A completed PT session counts as a visit day — re-check badges / challenges.
+      if (updates.status === 'completed') evaluateEngagement(session.memberId?._id || session.memberId).catch(() => {})
 
       // Notify the member — fire-and-forget, never blocks the response
       const sessionDate = new Date(session.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })

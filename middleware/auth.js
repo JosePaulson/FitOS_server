@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken'
 import User from '../models/User.js'
 import Gym from '../models/Gym.js'
+import { devOr } from '../utils/errors.js'
 
 // Staff routes that must keep working even when a gym's own FitOS
 // subscription has lapsed — otherwise a gym that can't pay could never
@@ -16,7 +17,7 @@ const SUBSCRIPTION_GATE_EXEMPT_PREFIXES = [
 export async function protect(req, res, next) {
   const header = req.headers.authorization
   if (!header?.startsWith('Bearer ')) {
-    return res.status(401).json({ message: 'No token provided' })
+    return res.status(401).json({ message: 'Please sign in to continue.' })
   }
 
   const token = header.split(' ')[1]
@@ -26,14 +27,14 @@ export async function protect(req, res, next) {
     const user    = await User.findById(decoded.id).select('-passwordHash -refreshToken')
 
     if (!user || !user.isActive) {
-      return res.status(401).json({ message: 'User not found or deactivated' })
+      return res.status(401).json({ message: 'This account is no longer active. Please contact the gym owner.' })
     }
 
     req.user  = user
     req.gymId = user.gymId
     await blockIfSubscriptionInactive(req, res, next)
   } catch {
-    return res.status(401).json({ message: 'Invalid or expired token' })
+    return res.status(401).json({ message: 'Your session has expired. Please sign in again.' })
   }
 }
 
@@ -75,7 +76,7 @@ export function authorize(...roles) {
   return (req, res, next) => {
     if (!roles.includes(req.user.role)) {
       return res.status(403).json({
-        message: `Role '${req.user.role}' is not allowed to access this resource`,
+        message: devOr(`Role '${req.user.role}' is not allowed to access this resource`, 'You don\u2019t have permission to do that.'),
       })
     }
     next()

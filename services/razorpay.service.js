@@ -3,7 +3,7 @@ import Razorpay from 'razorpay'
 import Gym from '../models/Gym.js'
 import Invoice from '../models/Invoice.js'
 import SubscriptionPlan from '../models/SubscriptionPlan.js'
-import { fulfillInvoicePayment } from './paymentFulfillment.service.js'
+import { fulfillInvoicePayment, recordInvoicePayment } from './paymentFulfillment.service.js'
 
 let _razorpay
 function getRazorpay() {
@@ -81,6 +81,39 @@ export async function createOrder({ amount, currency = 'INR', receipt, notes = {
   })
 }
 
+/**
+ * Creates a Razorpay hosted Payment Link for an invoice's outstanding balance
+ * — something the front desk can send over WhatsApp/SMS so a member can pay
+ * without opening the app. `amount` is in rupees.
+ *
+ * The invoice id travels in `notes` so the `payment_link.paid` webhook can find
+ * its way back (see handlePaymentLinkPaid). Partial payment by the customer is
+ * switched off: the link is for exactly the balance due.
+ */
+export async function createPaymentLink({ amount, referenceId, description, customer = {}, notes = {} }) {
+  // Razorpay wants an international-format contact; Indian members usually
+  // store a bare 10-digit number.
+  const digits = String(customer.phone || '').replace(/\D/g, '')
+  const contact = digits.length === 10 ? `+91${digits}` : (digits.length > 10 ? `+${digits}` : undefined)
+
+  return getRazorpay().paymentLink.create({
+    amount: Math.round(amount * 100),
+    currency: 'INR',
+    accept_partial: false,
+    reference_id: referenceId,           // must be unique per link, max 40 chars
+    description,
+    customer: {
+      name: customer.name,
+      ...(contact ? { contact } : {}),
+      ...(customer.email ? { email: customer.email } : {}),
+    },
+    notify: { sms: false, email: false }, // we share the URL ourselves
+    reminder_enable: false,
+    expire_by: Math.floor(Date.now() / 1000) + 14 * 24 * 60 * 60,
+    notes,
+  })
+}
+
 export async function fetchPayment(paymentId) {
   return getRazorpay().payments.fetch(paymentId)
 }
@@ -140,9 +173,42 @@ async function handleOneTimePaymentCaptured(payload) {
   })
 }
 
+/**
+ * A member paid an invoice through a Payment Link the front desk sent.
+ * Credits the amount actually received — which may be less than the invoice
+ * total if part payments were already recorded. recordInvoicePayment() is
+ * idempotent per payment id, so a re-delivered webhook is harmless.
+ */
+async function handlePaymentLinkPaid(payload) {
+  const link = payload?.payment_link?.entity
+  const payment = payload?.payment?.entity
+  const invoiceId = link?.notes?.invoiceId
+  if (!invoiceId || !payment) {
+    console.log('[Razorpay webhook] payment_link.paid without our invoice reference - ignored')
+    return
+  }
+  try {
+    await recordInvoicePayment({
+      invoiceId,
+      amount: (payment.amount || 0) / 100,
+      method: payment.method,
+      razorpayPaymentId: payment.id,
+      note: 'Payment link',
+    })
+  } catch (e) {
+    // "already paid" etc. is expected when the member also paid another way.
+    if (e.status) console.log(`[Razorpay webhook] payment_link.paid not applied: ${e.message}`)
+    else throw e
+  }
+}
+
 export async function handleWebhookEvent(event, payload) {
   if (event === 'payment.captured') {
     await handleOneTimePaymentCaptured(payload)
+    return
+  }
+  if (event === 'payment_link.paid') {
+    await handlePaymentLinkPaid(payload)
     return
   }
 

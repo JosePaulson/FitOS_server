@@ -1,4 +1,5 @@
 import multer from 'multer'
+import { devOr, withUserMessage } from '../utils/errors.js'
 
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg']
 const VIDEO_TYPES = ['video/mp4', 'video/webm', 'video/quicktime']
@@ -22,7 +23,9 @@ const storage = multer.memoryStorage()
 function fileFilter(allowedTypes) {
   return (_req, file, cb) => {
     if (allowedTypes.includes(file.mimetype)) return cb(null, true)
-    cb(new Error(`Unsupported file type: ${file.mimetype}`))
+    cb(withUserMessage(
+      new Error(`Unsupported file type: ${file.mimetype}`),
+      `That file type isn\u2019t supported.${allowedTypes === IMAGE_TYPES ? ' Please upload a JPG, PNG or WebP image.' : ''}`, 400))
   }
 }
 
@@ -44,7 +47,7 @@ export const uploadWorkoutMedia = multer({
   fileFilter: (req, file, cb) => {
     if (file.fieldname === 'image') return fileFilter(IMAGE_TYPES)(req, file, cb)
     if (file.fieldname === 'video') return fileFilter(VIDEO_TYPES)(req, file, cb)
-    cb(new Error(`Unexpected field: ${file.fieldname}`))
+    cb(withUserMessage(new Error(`Unexpected field: ${file.fieldname}`), 'That file wasn\u2019t expected. Please try again.', 400))
   },
 }).fields([
   { name: 'image', maxCount: 1 },
@@ -73,12 +76,16 @@ export function handleUploadErrors(uploadMiddleware) {
     uploadMiddleware(req, res, (err) => {
       if (!err) return next()
       if (err instanceof multer.MulterError) {
-        if (err.code === 'LIMIT_FILE_SIZE') {
-          return res.status(400).json({ message: 'File is too large.' })
-        }
-        return res.status(400).json({ message: `Upload error: ${err.message}` })
+        const friendly = err.code === 'LIMIT_FILE_SIZE' ? 'File is too large.'
+          : err.code === 'LIMIT_UNEXPECTED_FILE' ? 'That file wasn\u2019t expected. Please choose a single image.'
+          : err.code === 'LIMIT_FILE_COUNT' ? 'Too many files were selected.'
+          : 'The upload didn\u2019t work. Please try again.'
+        return res.status(400).json({ message: devOr(`Upload error: ${err.message} (${err.code})`, friendly) })
       }
-      return res.status(400).json({ message: err.message || 'Upload failed' })
+      // File-type errors carry a plain-language message; anything else (e.g. cloud storage) must not leak its wording.
+      return res.status(err.userMessage ? 400 : 502).json({
+        message: devOr(err.message || 'Upload failed', err.userMessage || 'The upload didn\u2019t work. Please try again.'),
+      })
     })
   }
 }

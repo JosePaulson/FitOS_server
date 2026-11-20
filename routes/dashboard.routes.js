@@ -2,9 +2,9 @@ import { Router } from 'express'
 import Member     from '../models/Member.js'
 import Invoice    from '../models/Invoice.js'
 import Lead       from '../models/Lead.js'
-import Attendance from '../models/Attendance.js'
 import Complaint  from '../models/Complaint.js'
 import { protect, authorize } from '../middleware/auth.js'
+import { visitsOnDay, istDay } from '../services/engagement.service.js'
 
 const router = Router()
 
@@ -12,7 +12,6 @@ router.get('/', protect, authorize('owner', 'manager'), async (req, res, next) =
   try {
     const gymId = req.gymId
     const now   = new Date()
-    const startOfToday = new Date(now); startOfToday.setHours(0, 0, 0, 0)
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
     const in7Days  = new Date(now); in7Days.setDate(now.getDate() + 7)
     const in30Days = new Date(now); in30Days.setDate(now.getDate() + 30)
@@ -28,7 +27,8 @@ router.get('/', protect, authorize('owner', 'manager'), async (req, res, next) =
       Member.countDocuments({ gymId, isActive: true, createdAt: { $gte: startOfMonth } }),
       Member.countDocuments({ gymId, membershipStatus: 'active', isActive: true, membershipExpiryDate: { $gte: now, $lte: in7Days } }),
       Member.countDocuments({ gymId, membershipStatus: 'active', isActive: true, membershipExpiryDate: { $gte: now, $lte: in30Days } }),
-      Attendance.countDocuments({ gymId, date: startOfToday }),
+      // Distinct members who showed up today (attendance / completed PT / workout log — once each)
+      visitsOnDay({ gymId, day: istDay(now) }).then((v) => v.length),
       Invoice.aggregate([
         { $match: { gymId, status: 'paid', paidAt: { $gte: startOfMonth } } },
         { $group: { _id: null, total: { $sum: '$totalAmount' } } },

@@ -4,6 +4,9 @@ import Member      from '../models/Member.js'
 import WorkoutPlan from '../models/WorkoutPlan.js'
 import DietPlan    from '../models/DietPlan.js'
 import Gym         from '../models/Gym.js'
+import { devOr, withUserMessage } from '../utils/errors.js'
+
+const AI_UNAVAILABLE = 'The AI coach is temporarily unavailable. Please try again later.'
 
 const router = Router()
 
@@ -101,7 +104,7 @@ router.post('/', async (req, res, next) => {
     // ── OpenAI ────────────────────────────────────────────────────────────
     if (provider === 'openai') {
       if (!process.env.OPENAI_API_KEY) {
-        return res.status(503).json({ message: 'AI service not configured. Set OPENAI_API_KEY in server/.env' })
+        return res.status(503).json({ message: devOr('AI service not configured. Set OPENAI_API_KEY in server/.env', AI_UNAVAILABLE) })
       }
 
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -132,7 +135,7 @@ router.post('/', async (req, res, next) => {
     // ── Anthropic Claude ──────────────────────────────────────────────────
     } else if (provider === 'anthropic') {
       if (!process.env.ANTHROPIC_API_KEY) {
-        return res.status(503).json({ message: 'AI service not configured. Set ANTHROPIC_API_KEY in server/.env' })
+        return res.status(503).json({ message: devOr('AI service not configured. Set ANTHROPIC_API_KEY in server/.env', AI_UNAVAILABLE) })
       }
 
       const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -161,7 +164,7 @@ router.post('/', async (req, res, next) => {
     // ── Google Gemini ─────────────────────────────────────────────────────
     } else if (provider === 'gemini') {
       if (!process.env.GEMINI_API_KEY) {
-        return res.status(503).json({ message: 'AI service not configured. Set GEMINI_API_KEY in server/.env' })
+        return res.status(503).json({ message: devOr('AI service not configured. Set GEMINI_API_KEY in server/.env', AI_UNAVAILABLE) })
       }
 
       const model    = process.env.GEMINI_MODEL || 'gemini-3.5-flash'
@@ -192,7 +195,7 @@ router.post('/', async (req, res, next) => {
       reply = data.candidates?.[0]?.content?.parts?.[0]?.text
 
     } else {
-      return res.status(400).json({ message: `Unknown AI_PROVIDER: ${provider}. Use 'openai', 'anthropic', or 'gemini'` })
+      return res.status(400).json({ message: devOr(`Unknown AI_PROVIDER: ${provider}. Use 'openai', 'anthropic', or 'gemini'`, AI_UNAVAILABLE) })
     }
 
     if (!reply) throw new Error('Empty response from AI provider')
@@ -200,7 +203,8 @@ router.post('/', async (req, res, next) => {
     res.json({ reply })
   } catch (err) {
     console.error('[AI chat]', err.message)
-    next(err)
+    // The provider's own error text (keys, quotas, model names) is for logs/dev only.
+    next(withUserMessage(err, 'The AI coach couldn\u2019t reply right now. Please try again in a moment.', err.status || 502))
   }
 })
 

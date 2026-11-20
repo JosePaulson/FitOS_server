@@ -5,6 +5,8 @@ import PTSession from '../models/PTSession.js'
 import Member from '../models/Member.js'
 import { estimateCaloriesBurned } from '../utils/calories.js'
 import { istStartOfDay, istEndOfDay } from '../utils/dateIST.js'
+import { notifyNewPRs } from '../services/progress.service.js'
+import { evaluateEngagement } from '../services/engagement.service.js'
 
 const router = Router()
 router.use(memberProtect)
@@ -72,6 +74,8 @@ router.post('/', async (req, res, next) => {
       caloriesBurned,
     })
 
+    // New-PR alert, then badges/challenges (fire-and-forget; never delays saving the workout)
+    notifyNewPRs(log).finally(() => evaluateEngagement(req.memberId))
     res.status(201).json(log)
   } catch (err) { next(err) }
 })

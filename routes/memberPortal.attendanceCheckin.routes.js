@@ -2,7 +2,9 @@ import { Router } from 'express'
 import { memberProtect } from '../middleware/memberAuth.js'
 import Gym from '../models/Gym.js'
 import Attendance from '../models/Attendance.js'
+import Member from '../models/Member.js'
 import { istStartOfDay } from '../utils/dateIST.js'
+import { evaluateEngagement } from '../services/engagement.service.js'
 
 const router = Router()
 router.use(memberProtect)
@@ -36,8 +38,10 @@ router.get('/today', async (req, res, next) => {
       gymId: req.gymId, memberId: req.memberId, date: startOfToday(), type: 'gym',
     })
     const gym = await Gym.findById(req.gymId).select('location')
+    const member = await Member.findById(req.memberId).select('membershipStatus')
     res.json({
       alreadyMarked: !!existing,
+      onHold: member?.membershipStatus === 'paused',
       gymLocationSet: !!(gym?.location?.lat != null && gym?.location?.lng != null),
     })
   } catch (err) { next(err) }
@@ -55,6 +59,11 @@ router.post('/checkin', async (req, res, next) => {
     const { lat, lng } = req.body
     if (typeof lat !== 'number' || typeof lng !== 'number') {
       return res.status(400).json({ message: 'Device location (lat, lng) required' })
+    }
+
+    const holder = await Member.findById(req.memberId).select('membershipStatus')
+    if (holder?.membershipStatus === 'paused') {
+      return res.status(403).json({ message: 'Your membership is on hold \u2014 resume it at the front desk to check in.' })
     }
 
     const gym = await Gym.findById(req.gymId).select('location')
@@ -88,6 +97,7 @@ router.post('/checkin', async (req, res, next) => {
       method: 'geofence',
     })
 
+    evaluateEngagement(req.memberId).catch(() => {}) // badges / challenges
     res.status(201).json({ record, alreadyMarked: false, distance: Math.round(distance) })
   } catch (err) {
     // Unique index (gymId, memberId, date, type) races to a duplicate-key

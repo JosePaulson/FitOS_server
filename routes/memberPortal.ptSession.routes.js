@@ -3,6 +3,9 @@ import { body, validationResult } from 'express-validator'
 import { memberProtect } from '../middleware/memberAuth.js'
 import PTSession from '../models/PTSession.js'
 import User from '../models/User.js'
+import Member from '../models/Member.js'
+import { notifyStaff, MANAGEMENT } from '../services/staffNotify.service.js'
+import { fmtDate, fmtTime } from '../utils/dateFormat.js'
 import TrainerAvailability from '../models/TrainerAvailability.js'
 import TrainerTimeOff from '../models/TrainerTimeOff.js'
 import { istDayName, istDateKey, istTimeOfDay, istDateTime, istStartOfDay, istEndOfDay } from '../utils/dateIST.js'
@@ -209,6 +212,17 @@ router.post('/request',
         { path: 'requestedTrainerId', select: 'name' },
       ])
 
+      // Tell the requested trainer (or, with no trainer chosen, the owner and managers)
+      Member.findById(req.memberId).select('name').lean().then((m) => notifyStaff(
+        req.gymId,
+        trainerId ? { userIds: [trainerId] } : { roles: MANAGEMENT },
+        {
+          title: 'New PT session request',
+          body: `${m?.name || 'A member'} requested ${fmtDate(when)} at ${fmtTime(when)}.`,
+          url: '/dashboard/pt-sessions', tag: `pt-request-${session._id}`,
+        }
+      )).catch(() => {})
+
       res.status(201).json(populated)
     } catch (err) { next(err) }
   }
@@ -230,7 +244,19 @@ router.post('/:id/cancel', async (req, res, next) => {
       return res.status(400).json({ message: 'Cannot cancel a session that has already passed' })
     }
 
+    const { trainerId: bookedTrainer, date: bookedFor, _id: sessionId } = session
     await session.deleteOne()
+
+    Member.findById(req.memberId).select('name').lean().then((m) => notifyStaff(
+      req.gymId,
+      bookedTrainer ? { userIds: [bookedTrainer] } : { roles: MANAGEMENT },
+      {
+        title: 'PT booking cancelled',
+        body: `${m?.name || 'A member'} cancelled their session on ${fmtDate(bookedFor)} at ${fmtTime(bookedFor)}.`,
+        url: '/dashboard/pt-sessions', tag: `pt-cancel-${sessionId}`,
+      }
+    )).catch(() => {})
+
     res.json({ message: 'Booking cancelled' })
   } catch (err) { next(err) }
 })

@@ -5,6 +5,7 @@ import { sendRenewalReminder }   from '../services/email.service.js'
 import { resolveGymSender }       from '../utils/gymEmailSender.js'
 import { sendRenewalReminderWA } from '../services/whatsapp.service.js'
 import { sendPushToMember }      from '../services/pushNotification.service.js'
+import { fmtDate } from '../utils/dateFormat.js'
 
 export function startRenewalReminderJob() {
   // 9 AM IST = 3:30 AM UTC
@@ -28,7 +29,7 @@ export function startRenewalReminderJob() {
         const gym = await Gym.findById(member.gymId)
         if (!gym || !['active', 'trialing'].includes(gym.planStatus)) continue
 
-        const expiryDate = member.membershipExpiryDate.toLocaleDateString('en-IN')
+        const expiryDate = fmtDate(member.membershipExpiryDate)
 
         // Resolve gym's own sender address + branding for the reminder email
         const { from, replyTo, gymName, logo, emailSignature, emailFooterText, renewalEmailBody } = await resolveGymSender(member.gymId)

@@ -5,6 +5,7 @@ import WorkoutPlan from '../models/WorkoutPlan.js'
 import DietPlan    from '../models/DietPlan.js'
 import Gym         from '../models/Gym.js'
 import { devOr, withUserMessage } from '../utils/errors.js'
+import { fmtDate } from '../utils/dateFormat.js'
 
 const AI_UNAVAILABLE = 'The AI coach is temporarily unavailable. Please try again later.'
 
@@ -50,7 +51,7 @@ You are currently speaking with ${member?.name || 'a gym member'} at ${gym?.name
 MEMBER PROFILE:
 - Name: ${member?.name}
 - Membership status: ${member?.membershipStatus}
-- Membership expires: ${member?.membershipExpiryDate ? new Date(member.membershipExpiryDate).toLocaleDateString('en-IN') : 'N/A'}
+- Membership expires: ${member?.membershipExpiryDate ? fmtDate(member.membershipExpiryDate) : 'N/A'}
 - Current plan: ${member?.currentPlanId?.name || 'No active plan'}
 - Assigned trainer: ${member?.assignedTrainerId?.name || 'None'}
 - Health notes: ${member?.healthNotes || 'None on file'}

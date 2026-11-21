@@ -8,6 +8,7 @@ import { evaluateEngagement } from '../services/engagement.service.js'
 import { syncMemberPTPlans } from '../services/ptPlanSync.service.js'
 import { estimateCaloriesBurned } from '../utils/calories.js'
 import { istStartOfDay, istEndOfDay } from '../utils/dateIST.js'
+import { fmtDate } from '../utils/dateFormat.js'
 
 const router = Router()
 
@@ -224,7 +225,7 @@ router.patch('/:id',
       if (updates.status === 'completed') evaluateEngagement(session.memberId?._id || session.memberId).catch(() => {})
 
       // Notify the member — fire-and-forget, never blocks the response
-      const sessionDate = new Date(session.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+      const sessionDate = fmtDate(session.date)
       const bodyText = updates.date
         ? `Your PT session was rescheduled to ${sessionDate}.`
         : `Your PT session on ${sessionDate} was updated.`
@@ -280,7 +281,7 @@ router.post('/:id/confirm',
         WORKOUT_POPULATE,
       ])
 
-      const sessionDate = new Date(session.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+      const sessionDate = fmtDate(session.date)
       sendPushToMember(session.memberId?._id || session.memberId, {
         title: 'PT session confirmed',
         body: `Your PT session request for ${sessionDate} was confirmed.`,
@@ -319,7 +320,7 @@ router.post('/:id/decline',
 
       if (!session) return res.status(404).json({ message: 'Pending request not found or access denied' })
 
-      const sessionDate = new Date(session.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+      const sessionDate = fmtDate(session.date)
       sendPushToMember(session.memberId?._id || session.memberId, {
         title: 'PT session request declined',
         body: req.body.reason

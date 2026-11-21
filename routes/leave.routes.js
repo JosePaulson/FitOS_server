@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { body, validationResult } from 'express-validator'
 import LeaveRequest from '../models/LeaveRequest.js'
 import { protect } from '../middleware/auth.js'
+import { notifyStaff, MANAGEMENT } from '../services/staffNotify.service.js'
 import { istDateKey, istDateTime } from '../utils/dateIST.js'
 
 const router = Router()
@@ -73,6 +74,11 @@ router.post('/my',
         leaveType: req.body.leaveType === 'paid' ? 'paid' : 'unpaid',
         reason: req.body.reason,
       })
+      notifyStaff(req.gymId, { roles: MANAGEMENT, exceptUserId: req.user._id }, {
+        title: 'New leave request',
+        body: `${req.user.name} requested ${request.days} day${request.days === 1 ? '' : 's'} of leave.`,
+        url: '/dashboard/leave', tag: `leave-${request._id}`,
+      })
       res.status(201).json(request)
     } catch (err) { next(err) }
   }
@@ -131,6 +137,9 @@ router.patch('/:id/approve',
       request.reviewNote = req.body.reviewNote || ''
       await request.save()
 
+      notifyStaff(req.gymId, { userIds: [request.staffId] }, {
+        title: 'Leave request approved ✅', body: 'Your leave request was approved.', url: '/dashboard/leave', tag: `leave-${request._id}`,
+      })
       res.json(request)
     } catch (err) { next(err) }
   }
@@ -149,6 +158,10 @@ router.patch('/:id/reject', requirePayroll('approve'), async (req, res, next) =>
     request.reviewNote = req.body.reason || ''
     await request.save()
 
+    notifyStaff(req.gymId, { userIds: [request.staffId] }, {
+      title: 'Leave request rejected', body: request.reviewNote ? `Reason: ${request.reviewNote}` : 'Your leave request was not approved.',
+      url: '/dashboard/leave', tag: `leave-${request._id}`,
+    })
     res.json(request)
   } catch (err) { next(err) }
 })

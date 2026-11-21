@@ -57,6 +57,19 @@ export async function pushToDevices(memberId, payload) {
   }
 
   const subscriptions = await PushSubscription.find({ memberId: memberId?._id || memberId })
+  await deliver(subscriptions, payload)
+}
+
+/** Push to every device a staff user has subscribed on (admin dashboard PWA). */
+export async function sendPushToUsers(userIds, payload) {
+  if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) return
+  const ids = [...new Set((userIds || []).map((u) => String(u?._id || u)))]
+  if (!ids.length) return
+  const subscriptions = await PushSubscription.find({ userId: { $in: ids } })
+  await deliver(subscriptions, payload)
+}
+
+async function deliver(subscriptions, payload) {
   if (subscriptions.length === 0) return
 
   const body = JSON.stringify({

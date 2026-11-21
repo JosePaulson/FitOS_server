@@ -2,6 +2,8 @@ import { Router } from 'express'
 import { body, validationResult } from 'express-validator'
 import { memberProtect } from '../middleware/memberAuth.js'
 import Complaint from '../models/Complaint.js'
+import Member from '../models/Member.js'
+import { notifyStaff, MANAGEMENT } from '../services/staffNotify.service.js'
 
 const router = Router()
 router.use(memberProtect)
@@ -41,6 +43,14 @@ router.post('/',
         type: type || 'complaint',
         category: category || 'other',
       })
+      Member.findById(req.memberId).select('name').lean().then((m) => notifyStaff(
+        req.gymId, { roles: MANAGEMENT },
+        {
+          title: complaint.type === 'request' ? 'New member request' : 'New member complaint',
+          body: `${m?.name || 'A member'}: ${subject}`.slice(0, 160),
+          url: '/dashboard/complaints', tag: `complaint-${complaint._id}`,
+        }
+      )).catch(() => {})
       res.status(201).json(complaint)
     } catch (err) { next(err) }
   }

@@ -1,7 +1,7 @@
 import { Schema, model } from 'mongoose'
 
 /**
- * A single browser/device's Web Push subscription for a member.
+ * A single browser/device's Web Push subscription for a member or a staff user.
  *
  * A member can have more than one (e.g. phone + laptop), since each browser
  * install generates its own subscription — that's why this is its own
@@ -10,7 +10,9 @@ import { Schema, model } from 'mongoose'
 const pushSubscriptionSchema = new Schema(
   {
     gymId:    { type: Schema.Types.ObjectId, ref: 'Gym',    required: true, index: true },
-    memberId: { type: Schema.Types.ObjectId, ref: 'Member', required: true, index: true },
+    // Exactly one of these is set: a member (member portal) or a staff user (admin dashboard).
+    memberId: { type: Schema.Types.ObjectId, ref: 'Member', index: true },
+    userId:   { type: Schema.Types.ObjectId, ref: 'User',   index: true },
 
     endpoint: { type: String, required: true, unique: true },
     keys: {
@@ -23,5 +25,10 @@ const pushSubscriptionSchema = new Schema(
   },
   { timestamps: true }
 )
+
+pushSubscriptionSchema.pre('validate', function (next) {
+  if (!this.memberId && !this.userId) return next(new Error('A push subscription needs a memberId or a userId'))
+  next()
+})
 
 export default model('PushSubscription', pushSubscriptionSchema)

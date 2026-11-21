@@ -5,6 +5,7 @@ import { addPlanDuration } from '../utils/planDuration.js'
 import { sendInvoiceEmail } from './email.service.js'
 import { resolveGymSender } from '../utils/gymEmailSender.js'
 import { sendPushToMember } from './pushNotification.service.js'
+import { notifyStaff, MANAGEMENT } from './staffNotify.service.js'
 import { syncMemberPTPlans } from './ptPlanSync.service.js'
 import { resumeMembership } from './membershipFreeze.service.js'
 import { grantReferralReward } from './referral.service.js'
@@ -123,6 +124,12 @@ export async function fulfillInvoicePayment({ invoiceId, razorpayPaymentId, razo
     const planName = invoice.type === 'pt'
       ? (assignment?.name || invoice.ptPlanId?.name || 'PT plan')
       : (invoice.planId?.name || 'Membership')
+
+    notifyStaff(invoice.gymId, { roles: MANAGEMENT }, {
+      title: 'Payment received',
+      body: `₹${invoice.totalAmount.toLocaleString('en-IN')} from ${member.name} for ${planName}.`,
+      url: '/dashboard/billing', tag: `invoice-paid-${invoice._id}`,
+    })
 
     sendPushToMember(member._id, {
       title: invoice.type === 'pt' ? 'PT plan activated 💪' : 'Payment received 🎉',

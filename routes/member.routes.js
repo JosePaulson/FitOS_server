@@ -18,6 +18,7 @@ import { addPlanDuration } from '../utils/planDuration.js'
 import { findActiveMemberByPhone, duplicatePhoneMessage } from '../services/memberIdentity.service.js'
 import { isValidPhone, phoneKey, digitsOf } from '../utils/identity.js'
 import { renewalPeriod, statusForExpiry } from '../utils/membershipDates.js'
+import { fmtDate } from '../utils/dateFormat.js'
 
 const router = Router()
 
@@ -76,9 +77,7 @@ async function fireEnrolmentEmails({ member, invoice, plan, gymId, isRenewal = f
   // Resolve gym's own sender address + branding (falls back to platform defaults if not set)
   const { from, replyTo, gymName, logo, emailSignature, emailFooterText, welcomeEmailBody, invoiceEmailBody } = await resolveGymSender(gymId)
 
-  const expiryDate = member.membershipExpiryDate?.toLocaleDateString('en-IN', {
-    day: 'numeric', month: 'long', year: 'numeric',
-  })
+  const expiryDate = fmtDate(member.membershipExpiryDate)
 
   if (!isRenewal) {
     // Welcome email — only on first enrolment

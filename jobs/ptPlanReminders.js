@@ -2,6 +2,7 @@ import cron from 'node-cron'
 import MemberPTPlan from '../models/MemberPTPlan.js'
 import Gym from '../models/Gym.js'
 import { sendPushToMember } from '../services/pushNotification.service.js'
+import { fmtDate } from '../utils/dateFormat.js'
 
 export function startPTPlanReminderJob() {
   // 9 AM IST = 3:30 AM UTC — same slot as the membership renewal reminders
@@ -47,7 +48,7 @@ export function startPTPlanReminderJob() {
         const remaining = plan.classesTotal - plan.classesUsed
         sendPushToMember(plan.memberId, {
           title: 'PT plan expiring in 3 days',
-          body: `"${plan.name}" expires on ${plan.expiryDate.toLocaleDateString('en-IN')}. ${remaining} class${remaining === 1 ? '' : 'es'} left.`,
+          body: `"${plan.name}" expires on ${fmtDate(plan.expiryDate)}. ${remaining} class${remaining === 1 ? '' : 'es'} left.`,
           url: '/workouts',
           tag: 'pt-plan-expiry-3day',
         }).catch((e) => console.error('[cron:pt-plan] Push error:', e.message))

@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { body, validationResult } from 'express-validator'
 import Reimbursement from '../models/Reimbursement.js'
 import { protect } from '../middleware/auth.js'
+import { notifyStaff, MANAGEMENT } from '../services/staffNotify.service.js'
 import { istDateKey, istDateTime } from '../utils/dateIST.js'
 
 const router = Router()
@@ -59,6 +60,11 @@ router.post('/my',
         amount: req.body.amount,
         note: req.body.note || '',
       })
+      notifyStaff(req.gymId, { roles: MANAGEMENT, exceptUserId: req.user._id }, {
+        title: 'New reimbursement request',
+        body: `${req.user.name} requested ₹${Number(request.amount).toLocaleString('en-IN')} for ${request.item}.`.slice(0, 160),
+        url: '/dashboard/reimbursements', tag: `reimb-${request._id}`,
+      })
       res.status(201).json(request)
     } catch (err) { next(err) }
   }
@@ -111,6 +117,10 @@ router.patch('/:id/approve', requirePayroll('approve'), async (req, res, next) =
     request.reviewNote = req.body.reviewNote || ''
     await request.save()
 
+    notifyStaff(req.gymId, { userIds: [request.staffId] }, {
+      title: 'Reimbursement approved ✅', body: `₹${Number(request.amount).toLocaleString('en-IN')} for ${request.item} was approved.`,
+      url: '/dashboard/reimbursements', tag: `reimb-${request._id}`,
+    })
     res.json(request)
   } catch (err) { next(err) }
 })
@@ -128,6 +138,10 @@ router.patch('/:id/reject', requirePayroll('approve'), async (req, res, next) =>
     request.reviewNote = req.body.reason || ''
     await request.save()
 
+    notifyStaff(req.gymId, { userIds: [request.staffId] }, {
+      title: 'Reimbursement rejected', body: request.reviewNote ? `Reason: ${request.reviewNote}` : 'Your reimbursement request was not approved.',
+      url: '/dashboard/reimbursements', tag: `reimb-${request._id}`,
+    })
     res.json(request)
   } catch (err) { next(err) }
 })
@@ -143,6 +157,10 @@ router.patch('/:id/mark-paid', requirePayroll('approve'), async (req, res, next)
     request.paidAt = new Date()
     await request.save()
 
+    notifyStaff(req.gymId, { userIds: [request.staffId] }, {
+      title: 'Reimbursement paid 💸', body: `₹${Number(request.amount).toLocaleString('en-IN')} for ${request.item} has been paid.`,
+      url: '/dashboard/reimbursements', tag: `reimb-${request._id}`,
+    })
     res.json(request)
   } catch (err) { next(err) }
 })

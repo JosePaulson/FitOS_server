@@ -13,11 +13,12 @@ import CouponRedemption from '../models/CouponRedemption.js'
 import MemberWaiver from '../models/MemberWaiver.js'
 import AuditLog from '../models/AuditLog.js'
 import { toCsv } from '../utils/csv.js'
+import { fmtDate, fmtDateTime } from '../utils/dateFormat.js'
 
 const MAX_ROWS = 200_000
 const IST = 'Asia/Kolkata'
-const d  = (v) => (v ? new Date(v).toLocaleDateString('en-IN', { timeZone: IST }) : '')
-const dt = (v) => (v ? new Date(v).toLocaleString('en-IN', { timeZone: IST, day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '')
+const d  = (v) => (v ? fmtDate(v) : '')
+const dt = (v) => (v ? fmtDateTime(v) : '')
 const col = (label, get) => ({ label, get })
 
 /** Optional ?from=&to= (YYYY-MM-DD) → a Mongo date filter, or undefined. */

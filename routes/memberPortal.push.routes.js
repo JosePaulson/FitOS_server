@@ -28,11 +28,14 @@ router.post('/subscribe', async (req, res, next) => {
     await PushSubscription.findOneAndUpdate(
       { endpoint },
       {
-        endpoint,
-        keys,
-        gymId:     req.gymId,
-        memberId:  req.memberId,
-        userAgent: req.headers['user-agent'] || '',
+        $set: {
+          endpoint,
+          keys,
+          gymId:     req.gymId,
+          memberId:  req.memberId,
+          userAgent: req.headers['user-agent'] || '',
+        },
+        $unset: { userId: '' },   // this device may previously have belonged to a staff user
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     )

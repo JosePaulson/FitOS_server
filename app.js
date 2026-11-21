@@ -37,6 +37,8 @@ import memberPortalRoutes from './routes/memberPortal.routes.js'
 import memberPortalChatRoutes from './routes/memberPortal.chat.routes.js'
 import ptSessionRoutes from './routes/ptSession.routes.js'
 import workoutLogRoutes from './routes/workoutLog.routes.js'
+import memberLogsRoutes from './routes/memberLogs.routes.js'
+import memberPortalLogSharingRoutes from './routes/memberPortal.logSharing.routes.js'
 import memberPortalPTRoutes from './routes/memberPortal.ptSession.routes.js'
 import equipmentRoutes from './routes/equipment.routes.js'
 import workoutLibraryRoutes from './routes/workoutLibrary.routes.js'
@@ -45,6 +47,7 @@ import exerciseCatalogRoutes from './routes/exerciseCatalog.routes.js'
 import memberPortalExerciseCatalogRoutes from './routes/memberPortal.exerciseCatalog.routes.js'
 import memberPortalWorkoutLibraryRoutes from './routes/memberPortal.workoutLibrary.routes.js'
 import memberPortalPushRoutes from './routes/memberPortal.push.routes.js'
+import staffPushRoutes from './routes/push.routes.js'
 import memberPortalFoodScanRoutes from './routes/memberPortal.foodScan.routes.js'
 import memberPortalPTPlanRoutes from './routes/memberPortal.ptPlan.routes.js'
 import memberPortalAttendanceCheckinRoutes from './routes/memberPortal.attendanceCheckin.routes.js'
@@ -176,6 +179,7 @@ app.use('/api/member-portal/chat', memberPortalChatRoutes)
 app.use('/api/member-portal/pt-sessions', memberPortalPTRoutes)
 app.use('/api/member-portal/equipment', memberPortalEquipmentRoutes)
 app.use('/api/member-portal/push', memberPortalPushRoutes)
+app.use('/api/push', staffPushRoutes)
 app.use('/api/member-portal/food-scan', memberPortalFoodScanRoutes)
 app.use('/api/member-portal/pt-plans', memberPortalPTPlanRoutes)
 app.use('/api/member-portal/attendance', memberPortalAttendanceCheckinRoutes)
@@ -192,10 +196,12 @@ app.use('/api/member-portal/staff-ratings', memberPortalStaffRatingRoutes)
 app.use('/api/member-portal/timetable', memberPortalTimetableRoutes)
 app.use('/api/member-portal/transformation', memberPortalTransformationRoutes)
 app.use('/api/member-portal/meal-log', memberPortalMealLogRoutes)
+app.use('/api/member-portal/log-sharing', memberPortalLogSharingRoutes)
 app.use('/api/member-portal/hydration', memberPortalHydrationRoutes)
 app.use('/api/member-portal', memberPortalRoutes)
 app.use('/api/pt-sessions', ptSessionRoutes)
 app.use('/api/workout-logs', workoutLogRoutes)
+app.use('/api/member-logs', memberLogsRoutes)
 app.use('/api/equipment', equipmentRoutes)
 app.use('/api/workout-library', workoutLibraryRoutes)
 app.use('/api/exercise-catalog', exerciseCatalogRoutes)

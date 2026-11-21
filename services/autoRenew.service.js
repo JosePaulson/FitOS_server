@@ -4,6 +4,7 @@ import Invoice from '../models/Invoice.js'
 import { priceInvoice } from '../utils/pricing.js'
 import { createPaymentLink, isRazorpayConfigured } from './razorpay.service.js'
 import { sendPushToMember } from './pushNotification.service.js'
+import { fmtDate } from '../utils/dateFormat.js'
 
 export const RENEWAL_LEAD_DAYS = 3
 const DAY = 86_400_000
@@ -59,7 +60,7 @@ export async function runAutoRenewInvoices(now = new Date()) {
         } catch (e) { console.error('[auto-renew] payment link failed:', e.message) } // the in-app pay button still works
       }
 
-      const when = expiry.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' })
+      const when = fmtDate(expiry)
       sendPushToMember(member._id, {
         title: 'Time to renew 💪',
         body: `Your ${plan.name} membership ends on ${when}. Renew in one tap — ₹${invoice.totalAmount.toLocaleString('en-IN')}.`,

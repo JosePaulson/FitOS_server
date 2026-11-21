@@ -34,6 +34,15 @@ const memberSchema = new Schema(
     membershipExpiryDate: { type: Date, index: true },
     assignedTrainerId: { type: Schema.Types.ObjectId, ref: 'User' },
 
+    // What the member lets the gym see of their self-kept logs. Off by default.
+    // When a log type is shared, the owner and managers can always see it; trainers
+    // only if the member picked them in `trainerIds`. (See utils/logSharing.js.)
+    logSharing: {
+      workoutLogs: { type: Boolean, default: false },
+      mealLogs:    { type: Boolean, default: false },
+      trainerIds:  [{ type: Schema.Types.ObjectId, ref: 'User' }],
+    },
+
     source: {
       type: String,
       enum: ['walk-in', 'referral', 'social', 'lead', 'online', 'other'],

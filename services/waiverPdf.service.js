@@ -1,6 +1,7 @@
 import PDFDocument from 'pdfkit'
+import { fmtDate, fmtDateTime } from '../utils/dateFormat.js'
 
-const fmt = (d) => (d ? new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' }) : '-')
+const fmt = (d) => (d ? fmtDateTime(d) : '-')
 
 /** Streams the signed waiver + PAR-Q as a PDF record into `res`. */
 export function streamWaiverPdf({ waiver, member, gym }, res) {

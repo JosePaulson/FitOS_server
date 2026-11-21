@@ -2,6 +2,7 @@ import Member from '../models/Member.js'
 import Invoice from '../models/Invoice.js'
 import { priceInvoice } from '../utils/pricing.js'
 import { sendPushToMember } from './pushNotification.service.js'
+import { fmtDate } from '../utils/dateFormat.js'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 export const MAX_FREEZE_DAYS = 180
@@ -54,7 +55,7 @@ export async function freezeMembership(member, { endDate, reason, fee = 0, by } 
   sendPushToMember(member._id, {
     title: 'Membership on hold ⏸️',
     body: planned
-      ? `Your membership is on hold until ${planned.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}. The days you\u2019re away will be added back.`
+      ? `Your membership is on hold until ${fmtDate(planned)}. The days you\u2019re away will be added back.`
       : 'Your membership is on hold. The days you\u2019re away will be added back when you resume.',
     url: '/', tag: 'membership-freeze',
   }).catch((e) => console.error('[freeze] push failed:', e.message))
@@ -92,7 +93,7 @@ export async function resumeMembership(member, { by, auto = false } = {}) {
 
   sendPushToMember(member._id, {
     title: 'Welcome back 💪',
-    body: `Your membership is active again — ${days} day${days === 1 ? '' : 's'} added back. New expiry: ${member.membershipExpiryDate?.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}.`,
+    body: `Your membership is active again — ${days} day${days === 1 ? '' : 's'} added back. New expiry: ${fmtDate(member.membershipExpiryDate)}.`,
     url: '/', tag: 'membership-resume',
   }).catch((e) => console.error('[freeze] push failed:', e.message))
 

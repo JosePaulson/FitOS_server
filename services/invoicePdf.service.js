@@ -1,10 +1,11 @@
 import PDFDocument from 'pdfkit'
 import { extractTax } from '../utils/tax.js'
 import { splitGst, amountInWordsINR } from '../utils/pricing.js'
+import { fmtDate as formatDateIST } from '../utils/dateFormat.js'
 
 // pdfkit's built-in Helvetica has no ₹ glyph, so amounts are printed as "Rs."
 const money = (n) => `Rs. ${(Number(n) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }) : '-')
+const fmtDate = (d) => (d ? formatDateIST(d) : '-')
 const METHOD = { cash: 'Cash', upi: 'UPI', card: 'Card', netbanking: 'Net banking', wallet: 'Wallet', emi: 'EMI', paylater: 'Pay later', online: 'Online', other: 'Other' }
 
 const INK = '#111827', MUTED = '#6b7280', LINE = '#d1d5db', ACCENT = '#1f2937'

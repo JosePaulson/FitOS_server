@@ -30,6 +30,11 @@ const memberWorkoutLogSchema = new Schema(
 
     notes: { type: String, default: '' },
 
+    // Ids of Workout Videos sessions already merged into this log. Lets a
+    // retried upload (e.g. the first request got through but the response was
+    // lost on a weak connection) be recognised and NOT appended a second time.
+    videoSessionIds: { type: [String], default: undefined },
+
     // Estimated the same way as PTSession — see utils/calories.js
     caloriesBurned: { type: Number, default: null },
   },

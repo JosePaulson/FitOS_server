@@ -130,7 +130,7 @@ const rateLimitHandler = (req, res, _next, options) => {
 }
 
 app.use('/api', rateLimit({
-  windowMs: 15 * 60 * 1000, max: 200,
+  windowMs: 15 * 60 * 1000, max: process.env.NODE_ENV === 'development' ? 5000 : 200,
   standardHeaders: true, legacyHeaders: false,
   message: 'Too many requests, please try again later.',
   handler: rateLimitHandler,

@@ -2,41 +2,13 @@ import { Router } from 'express'
 import { memberProtect } from '../middleware/memberAuth.js'
 import MemberWorkoutLog from '../models/MemberWorkoutLog.js'
 import PTSession from '../models/PTSession.js'
-import Member from '../models/Member.js'
-import { estimateCaloriesBurned } from '../utils/calories.js'
 import { istStartOfDay, istEndOfDay } from '../utils/dateIST.js'
 import { notifyNewPRs } from '../services/progress.service.js'
 import { evaluateEngagement } from '../services/engagement.service.js'
+import { resolveCalories, logOrAppendWorkout } from '../services/workoutLog.service.js'
 
 const router = Router()
 router.use(memberProtect)
-
-/**
- * Estimate calories the same way PT sessions do — filling in a bodyweight
- * from the member's most recent logged entry (across BOTH self-logged
- * workouts and PT sessions) if this one doesn't have one yet.
- */
-async function resolveCalories({ gymId, memberId, excludeId, bodyWeight, durationMinutes, exercises }) {
-  let weightKg = Number(bodyWeight) || null
-
-  if (!weightKg) {
-    const [lastLog, lastSession] = await Promise.all([
-      MemberWorkoutLog.findOne({
-        gymId, memberId, bodyWeight: { $exists: true, $ne: null },
-        ...(excludeId ? { _id: { $ne: excludeId } } : {}),
-      }).sort({ date: -1 }).select('bodyWeight date'),
-      PTSession.findOne({
-        gymId, memberId, bodyWeight: { $exists: true, $ne: null },
-      }).sort({ date: -1 }).select('bodyWeight date'),
-    ])
-    const candidates = [lastLog, lastSession].filter(Boolean).sort((a, b) => new Date(b.date) - new Date(a.date))
-    weightKg = candidates[0]?.bodyWeight || null
-  }
-  if (!weightKg) return null
-
-  const member = await Member.findOne({ _id: memberId, gymId }).select('height')
-  return estimateCaloriesBurned({ heightCm: member?.height, weightKg, durationMinutes, exercises })
-}
 
 /** POST /api/member-portal/workout-logs — log a self-tracked workout */
 router.post('/', async (req, res, next) => {
@@ -77,6 +49,43 @@ router.post('/', async (req, res, next) => {
     // New-PR alert, then badges/challenges (fire-and-forget; never delays saving the workout)
     notifyNewPRs(log).finally(() => evaluateEngagement(req.memberId))
     res.status(201).json(log)
+  } catch (err) { next(err) }
+})
+
+/**
+ * POST /api/member-portal/workout-logs/session — log a finished Workout Videos
+ * session. The session lives on the member's device until they choose to log
+ * it; this creates today's workout log, or appends to the day's existing one
+ * (never a second log for the same day).
+ * Body: { sessionId, startedAt, lastActivityAt, exercises: [...], bodyWeight? }
+ */
+router.post('/session', async (req, res, next) => {
+  try {
+    const { sessionId, startedAt, lastActivityAt, exercises, bodyWeight } = req.body || {}
+
+    const hasExercises = Array.isArray(exercises) && exercises.some((e) => e?.name?.trim())
+    if (!hasExercises) return res.status(400).json({ message: 'Nothing to log' })
+
+    let bw
+    if (bodyWeight !== undefined && bodyWeight !== null && bodyWeight !== '') {
+      bw = Number(bodyWeight)
+      if (!(bw >= 20 && bw <= 400)) return res.status(400).json({ message: 'Enter your weight in kg (20–400).' })
+    }
+
+    // Device clocks drift — never trust a start/end in the future, or an end before the start.
+    const now = new Date()
+    let start = new Date(startedAt)
+    if (Number.isNaN(start.getTime()) || start > now) start = now
+    let end = new Date(lastActivityAt)
+    if (Number.isNaN(end.getTime()) || end < start) end = start
+    if (end > now) end = now
+
+    const { log, appended } = await logOrAppendWorkout({
+      gymId: req.gymId, memberId: req.memberId,
+      sessionId: typeof sessionId === 'string' ? sessionId.slice(0, 64) : undefined,
+      exercises, startedAt: start, lastActivityAt: end, bodyWeight: bw,
+    })
+    res.status(appended ? 200 : 201).json({ log, appended })
   } catch (err) { next(err) }
 })
 

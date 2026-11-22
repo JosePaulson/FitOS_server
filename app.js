@@ -5,6 +5,8 @@ import cors from 'cors'
 import helmet from 'helmet'
 import morgan from 'morgan'
 import rateLimit from 'express-rate-limit'
+import * as rateLimitPkg from 'express-rate-limit' // for ipKeyGenerator (v8+); absent on v7, handled below
+import jwt from 'jsonwebtoken'
 
 import connectDB from './config/db.js'
 import errorHandler from './middleware/errorHandler.js'
@@ -98,12 +100,15 @@ app.set('trust proxy', 1)
 
 // A fresh value every time the process boots — the simplest reliable signal
 // that "the server was redeployed", without needing a manual version bump.
-// The frontends poll GET /api/version and prompt to reload if this changes
-// since the page was loaded, covering server-side code updates.
+// It is sent on EVERY response as an `X-Server-Version` header (below); the
+// frontends watch it and prompt to reload if it changes since the page loaded,
+// covering server-side code updates with zero polling. GET /api/version remains
+// as a slow fallback for clients that haven't seen the header yet.
 const SERVER_BOOT_VERSION = String(Date.now())
 
 // ── Security & logging ────────────────────────────────────────────────────
 app.use(helmet())
+app.use((_req, res, next) => { res.setHeader('X-Server-Version', SERVER_BOOT_VERSION); next() })
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'))
 
 // ── Webhook MUST be mounted before express.json() (needs raw body) ────────
@@ -113,24 +118,58 @@ app.use('/api/webhooks/razorpay', webhookRoutes)
 app.use(cors({
   origin: [process.env.CLIENT_URL, process.env.MEMBER_PORTAL_URL, process.env.MEMBER_PORTAL_URL_VERCEL, process.env.CLIENT_URL_VERCEL, 'http://localhost:5173', 'http://192.168.0.112:8081', 'http://192.168.0.112:5174', 'http://localhost:8081', 'http://192.168.0.105:8081', 'exp://192.168.0.105:8081'],
   credentials: true,
+  exposedHeaders: ['X-Server-Version'], // lets the frontends read the header cross-origin
 }))
 
 // ── Body parsers ──────────────────────────────────────────────────────────
 app.use(express.json({ limit: '5mb' }))
 app.use(express.urlencoded({ extended: true }))
 
+// ── Server version (fallback poll) ────────────────────────────────────────
+// Deliberately mounted BEFORE rate limiting, auth and DB-dependent logic —
+// it must always respond fast, even if the database is briefly down, and a
+// frontend's version check must never be what pushes someone over the limit.
+// Normally unused: frontends read the X-Server-Version header instead.
+// No auth required — works for a logged-out/expired session too.
+app.get('/api/version', (_req, res) => {
+  res.json({ version: SERVER_BOOT_VERSION })
+})
+
 // ── Rate limiters ─────────────────────────────────────────────────────────
-// Both limiters key on plain client IP (express-rate-limit's default
-// keyGenerator, req.ip) — no per-user or per-gym logic layered on top.
-// The general limit is generous (200/15min) specifically because many
-// members hit the API from the same gym WiFi, i.e. the same public IP;
-// a tighter per-IP limit would end up throttling a whole gym at once.
+// The general limiter buckets by SIGNED-IN USER (staff or member), falling
+// back to client IP for anyone without a valid token. Keying on IP alone
+// meant every member on the gym WiFi — one public IP — shared a single
+// 200-request bucket, so a few phones with the app open could lock the whole
+// gym out. The token's signature is verified here, so a forged or garbage
+// token can't be used to dodge the limit; it simply lands in the IP bucket.
+// The auth limiter below stays on plain IP: it guards login/OTP brute-forcing
+// before anyone is signed in.
 const rateLimitHandler = (req, res, _next, options) => {
   res.status(options.statusCode).json({ message: options.message })
 }
 
+// v8+ of express-rate-limit wants IPv6 addresses collapsed to a subnet; v7 has no such helper.
+const ipKey = (ip) => (typeof rateLimitPkg.ipKeyGenerator === 'function' ? rateLimitPkg.ipKeyGenerator(ip) : ip)
+
+function rateLimitKey(req) {
+  const header = req.headers.authorization
+  if (header?.startsWith('Bearer ')) {
+    const token = header.slice(7)
+    // Member tokens use MEMBER_JWT_SECRET (or JWT_SECRET when unset); staff tokens use JWT_SECRET.
+    for (const secret of [process.env.MEMBER_JWT_SECRET, process.env.JWT_SECRET]) {
+      if (!secret) continue
+      try {
+        const { id } = jwt.verify(token, secret)
+        if (id) return `u:${id}`
+      } catch { /* wrong secret / expired / malformed — try the next, else fall back to IP */ }
+    }
+  }
+  return `ip:${ipKey(req.ip)}`
+}
+
 app.use('/api', rateLimit({
   windowMs: 15 * 60 * 1000, max: process.env.NODE_ENV === 'development' ? 5000 : 200,
+  keyGenerator: rateLimitKey,
   standardHeaders: true, legacyHeaders: false,
   message: 'Too many requests, please try again later.',
   handler: rateLimitHandler,
@@ -215,14 +254,6 @@ app.use('/api/timetable', timetableRoutes)
 app.use('/api/pt-earnings', ptEarningsRoutes)
 
 // ── Health check ──────────────────────────────────────────────────────────
-// Deliberately mounted before rate limiting, auth, and DB-dependent logic —
-// this must always respond fast, even if the database is briefly down.
-// Polled by both frontends to detect a server redeploy and prompt a reload.
-// No auth required — needs to work even for a logged-out/expired session.
-app.get('/api/version', (_req, res) => {
-  res.json({ version: SERVER_BOOT_VERSION })
-})
-
 // Used by uptime pingers (see deployment notes) to keep a Render free-tier
 // instance from spinning down after 15 minutes of inactivity.
 app.get('/health', (_req, res) => {
